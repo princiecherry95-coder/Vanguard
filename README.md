@@ -32,6 +32,10 @@ Then run Streamlit on the isolated network.
 
 The **Quarantine IP** action is deliberately a local session-state simulation. It does **not** modify host firewalls, routing, DNS, network controls, or external infrastructure. Incident reports are generated locally and contain no external API calls.
 
+## Validation
+
+CI performs an offline source smoke test before dependency installation, followed by Python syntax validation and a local Streamlit HTTP smoke test.
+
 ## Repository
 
 `princiecherry95-coder/Vanguard`
