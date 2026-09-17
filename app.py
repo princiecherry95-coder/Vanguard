@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import html
+import json
+from datetime import datetime, timezone
+
+import pandas as pd
+import streamlit as st
+
+st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
+
+MOCK_LOGS = [
+    {"timestamp":"2026-09-17 19:52:14","event_id":"EVT-7F31A9","source_ip":"10.42.17.91","severity":"CRITICAL","target_endpoint":"/api/auth/login","attack_type":"SQL Injection / Tautology Bypass","raw_payload":"' OR '1'='1' --","description":"The request attempts to manipulate an authentication query so the condition evaluates as true, potentially bypassing normal credential validation."},
+    {"timestamp":"2026-09-17 19:51:42","event_id":"EVT-0C82D4","source_ip":"10.42.22.14","severity":"CRITICAL","target_endpoint":"/search?q=users","attack_type":"Cross-Site Scripting (XSS)","raw_payload":"<script>alert(document.domain)</script>","description":"The request contains executable script markup. If reflected or stored without output encoding, it could execute in another user's browser security context."},
+    {"timestamp":"2026-09-17 19:50:11","event_id":"EVT-91BC20","source_ip":"10.42.31.77","severity":"WARNING","target_endpoint":"/admin/export","attack_type":"Suspicious Parameter Manipulation","raw_payload":"format=csv&scope=../../admin/system","description":"An administrative export request contains an unexpected path-like parameter. Validate authorization and input handling."},
+    {"timestamp":"2026-09-17 19:48:33","event_id":"EVT-4420DE","source_ip":"10.42.18.44","severity":"WARNING","target_endpoint":"/api/session","attack_type":"Authentication Anomaly","raw_payload":"session_id=8d1f...; retry_count=17","description":"Repeated session activity from a single source exceeds the normal behavioral threshold."},
+    {"timestamp":"2026-09-17 19:47:05","event_id":"EVT-2A71F0","source_ip":"10.42.12.103","severity":"LOW","target_endpoint":"/health","attack_type":"Network Probe","raw_payload":"GET /health HTTP/1.1","description":"A routine-looking service discovery request was observed. No direct exploitation indicator was identified."},
+    {"timestamp":"2026-09-17 19:45:29","event_id":"EVT-73A112","source_ip":"10.42.25.61","severity":"CRITICAL","target_endpoint":"/api/users","attack_type":"SQL Injection","raw_payload":"id=42 UNION SELECT username,password FROM users --","description":"The payload attempts to alter a database query and retrieve data from another database relation."},
+    {"timestamp":"2026-09-17 19:43:52","event_id":"EVT-CC1021","source_ip":"10.42.16.19","severity":"WARNING","target_endpoint":"/upload","attack_type":"Unexpected File Upload","raw_payload":"filename=payload.jsp; content-type=application/octet-stream","description":"A file upload does not match the expected application profile. Investigate against the allowed upload policy."},
+    {"timestamp":"2026-09-17 19:41:18","event_id":"EVT-19F0A4","source_ip":"10.42.29.88","severity":"LOW","target_endpoint":"/robots.txt","attack_type":"Reconnaissance","raw_payload":"GET /robots.txt HTTP/1.1","description":"A low-confidence reconnaissance event was observed."},
+]
+
+CSS = """
+<style>
+.stApp{background:#070b10;color:#e7edf5}.block-container{max-width:1500px;padding:1rem 2rem 2rem}
+.vh{border:1px solid #243241;border-radius:14px;padding:18px 22px;background:linear-gradient(135deg,#0b1118,#0a0f15);margin-bottom:14px}.vt{font-size:1.45rem;font-weight:800;letter-spacing:.04em}.vs{color:#5ee38a;font-weight:700;margin-top:4px}.metric{border:1px solid #253444;border-radius:12px;padding:14px 16px;background:#0c1219}.mv{font-size:1.5rem;font-weight:800}.ml{color:#91a1b4;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em}
+.panel{border:1px solid #253444;border-radius:14px;padding:16px;background:#0a1017;min-height:520px}.pt{font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#b8c6d6;margin-bottom:12px}.log{border:1px solid #1e2b38;border-left:4px solid #5ee38a;border-radius:8px;padding:10px 12px;margin:7px 0;background:#0d141c}.log.Critical{border-left-color:#ff4d5f}.log.Warning{border-left-color:#f6c453}.lh{display:flex;justify-content:space-between;gap:8px;font-size:.82rem}.sev{font-weight:800}.Critical .sev{color:#ff6675}.Warning .sev{color:#f6c453}.Low .sev{color:#5ee38a}.lm{color:#9aaabd;font-size:.76rem;margin-top:3px}.pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#15202b;font-size:.7rem}.box{border:1px solid #253444;border-radius:9px;padding:12px;background:#080d13;margin:9px 0}.ai{border-left:3px solid #7aa7ff;background:#0d1520;border-radius:8px;padding:12px}.q{color:#ff6675;font-weight:800}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
+
+def init_state() -> None:
+    defaults = {
+        "demo_mode": True,
+        "logs": [dict(x) for x in MOCK_LOGS],
+        "quarantined_ips": set(),
+        "selected_event": MOCK_LOGS[0]["event_id"],
+        "incident_exports": 0,
+        "last_action": "System initialized in air-gapped mode.",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def dataframe() -> pd.DataFrame:
+    return pd.DataFrame(st.session_state.logs)
+
+
+def selected_log() -> dict | None:
+    for log in st.session_state.logs:
+        if log["event_id"] == st.session_state.selected_event:
+            return log
+    return st.session_state.logs[0] if st.session_state.logs else None
+
+
+def reset_demo() -> None:
+    st.session_state.logs = [dict(x) for x in MOCK_LOGS]
+    st.session_state.quarantined_ips = set()
+    st.session_state.selected_event = MOCK_LOGS[0]["event_id"]
+    st.session_state.incident_exports = 0
+    st.session_state.last_action = "Demo telemetry reset."
+
+
+def incident_report(log: dict) -> bytes:
+    report = {
+        "system": "Vanguard-SIEM",
+        "classification": "LOCAL TRAINING / HACKATHON TELEMETRY",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "event": log,
+        "response_state": "QUARANTINED" if log["source_ip"] in st.session_state.quarantined_ips else "OBSERVED",
+        "console_state": {"network": "DISCONNECTED", "telemetry": "LOCAL", "external_apis": False},
+    }
+    return json.dumps(report, indent=2).encode("utf-8")
+
+
+init_state()
+
+st.markdown('<div class="vh"><div class="vt">🛡️ VANGUARD-SIEM // Tactical Operations Console</div><div class="vs">🟢 Status: SECURED (Air-Gapped Local Net)</div></div>', unsafe_allow_html=True)
+
+c1, c2 = st.columns([5, 1])
+with c1:
+    st.caption("Tactical AI-Augmented Log Intelligence Console • Local-only defensive telemetry")
+with c2:
+    demo = st.toggle("⚡ Demo Mode", value=st.session_state.demo_mode)
+    if demo != st.session_state.demo_mode:
+        st.session_state.demo_mode = demo
+        if demo:
+            reset_demo()
+
+_df = dataframe()
+metrics = st.columns(4)
+critical = int((_df["severity"] == "CRITICAL").sum()) if not _df.empty else 0
+warnings = int((_df["severity"] == "WARNING").sum()) if not _df.empty else 0
+for col, value, label in zip(metrics, [len(_df), critical, warnings, len(st.session_state.quarantined_ips)], ["Total Log Entries", "Critical Anomalies", "Warnings Flagged", "Quarantined Hosts"]):
+    with col:
+        st.markdown(f'<div class="metric"><div class="mv">{value}</div><div class="ml">{label}</div></div>', unsafe_allow_html=True)
+
+left, right = st.columns([1.35, 1], gap="large")
+with left:
+    st.markdown('<div class="panel"><div class="pt">Live Security Log Stream</div>', unsafe_allow_html=True)
+    fcol, rcol = st.columns([3, 1])
+    with fcol:
+        severity_filter = st.selectbox("Filter", ["ALL", "CRITICAL", "WARNING", "LOW"], label_visibility="collapsed")
+    with rcol:
+        if st.button("↻ Refresh", use_container_width=True):
+            st.session_state.last_action = "Local telemetry stream refreshed."
+            st.rerun()
+    view = _df if severity_filter == "ALL" else _df[_df["severity"] == severity_filter]
+    if view.empty:
+        st.info("No events match the current filter.")
+    for row in view.to_dict("records"):
+        sev = row["severity"].title()
+        state = " • QUARANTINED" if row["source_ip"] in st.session_state.quarantined_ips else ""
+        st.markdown(f'<div class="log {sev}"><div class="lh"><span>{html.escape(row["timestamp"])} · <b>{html.escape(row["event_id"])}</b></span><span class="sev">{html.escape(row["severity"])}{state}</span></div><div><b>{html.escape(row["attack_type"])}</b> <span class="pill">{html.escape(row["source_ip"])}</span></div><div class="lm">Target: {html.escape(row["target_endpoint"])}</div></div>', unsafe_allow_html=True)
+    if not _df.empty:
+        options = _df["event_id"].tolist()
+        current_index = options.index(st.session_state.selected_event) if st.session_state.selected_event in options else 0
+        selected = st.selectbox("Inspect Event", options, index=current_index)
+        st.session_state.selected_event = selected
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with right:
+    log = selected_log()
+    st.markdown('<div class="panel"><div class="pt">Tactical AI Inspector & Playbook</div>', unsafe_allow_html=True)
+    if log is None:
+        st.info("No telemetry available.")
+    else:
+        st.markdown(f'<div class="box"><b>Event ID</b><br>{html.escape(log["event_id"])}<br><br><b>Source IP</b><br>{html.escape(log["source_ip"])}<br><br><b>Target Endpoint</b><br>{html.escape(log["target_endpoint"])}</div>', unsafe_allow_html=True)
+        st.caption("RAW PAYLOAD")
+        st.code(log["raw_payload"], language="text")
+        st.markdown(f'<div class="ai"><b>Plain-language AI threat translation</b><br><br>{html.escape(log["description"])}</div>', unsafe_allow_html=True)
+        st.write("")
+        q1, q2 = st.columns(2)
+        with q1:
+            if st.button("🔒 Quarantine IP", type="primary", use_container_width=True):
+                st.session_state.quarantined_ips.add(log["source_ip"])
+                for item in st.session_state.logs:
+                    if item["source_ip"] == log["source_ip"]:
+                        item["host_state"] = "QUARANTINED"
+                st.session_state.last_action = f"Local quarantine state applied to {log['source_ip']}. No external firewall action performed."
+                st.rerun()
+        with q2:
+            report = incident_report(log)
+            if st.download_button("⬇ Export Incident Report", data=report, file_name=f"vanguard_{log['event_id']}.json", mime="application/json", use_container_width=True):
+                st.session_state.incident_exports += 1
+                st.session_state.last_action = f"Incident report exported for {log['event_id']}."
+        if log["source_ip"] in st.session_state.quarantined_ips:
+            st.markdown(f'<div class="q">● Host {html.escape(log["source_ip"])} is quarantined in session state.</div>', unsafe_allow_html=True)
+        if st.button("↺ Reset Demo Data", use_container_width=True):
+            reset_demo()
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.caption(f"Last action: {st.session_state.last_action}  •  Reports: {st.session_state.incident_exports}  •  NETWORK DISCONNECTED  •  TELEMETRY LOCAL")
