@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   smoke-test:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 10
     steps:
       - name: Checkout source
@@ -34,20 +34,33 @@ jobs:
         run: python -m py_compile app.py
 
       - name: Streamlit runtime smoke test
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          python -m streamlit run app.py --server.headless true --server.port 8501 > streamlit.log 2>&1 &
-          PID=$!
-          trap 'kill $PID 2>/dev/null || true' EXIT
-          for i in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:8501/ > /tmp/vanguard.html; then
-              break
-            fi
-            sleep 1
-          done
-          test -s /tmp/vanguard.html
-          grep -q "VANGUARD-SIEM" /tmp/vanguard.html
-          grep -q "Tactical Operations Console" /tmp/vanguard.html
-          grep -q "Air-Gapped Local Net" /tmp/vanguard.html
-          echo "Vanguard-SIEM runtime smoke test PASSED."
+          $ErrorActionPreference = 'Stop'
+          $process = Start-Process python -ArgumentList '-m streamlit run app.py --server.headless true --server.port 8501' -RedirectStandardOutput streamlit.log -RedirectStandardError streamlit-error.log -PassThru
+          try {
+            $passed = $false
+            for ($i = 1; $i -le 30; $i++) {
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8501/' -UseBasicParsing -TimeoutSec 3
+                if ($response.StatusCode -eq 200) {
+                  $body = $response.Content
+                  if ($body -match 'VANGUARD-SIEM' -and $body -match 'Tactical Operations Console' -and $body -match 'Air-Gapped Local Net') {
+                    $passed = $true
+                    break
+                  }
+                }
+              } catch { }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $passed) {
+              Write-Host '--- streamlit.log ---'
+              if (Test-Path streamlit.log) { Get-Content streamlit.log }
+              Write-Host '--- streamlit-error.log ---'
+              if (Test-Path streamlit-error.log) { Get-Content streamlit-error.log }
+              throw 'Vanguard-SIEM runtime smoke test FAILED.'
+            }
+            Write-Host 'Vanguard-SIEM runtime smoke test PASSED.'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
