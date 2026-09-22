@@ -9,6 +9,7 @@ import streamlit as st
 
 from engine import correlate, detect, detect_behavior, parse_line
 from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, lines_from_upload, safe_uploaded_text
+from audit import audit_event
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -142,12 +143,14 @@ with right:
                 for item in st.session_state.logs:
                     if item["source_ip"] == log["source_ip"]:
                         item["host_state"] = "QUARANTINED"
+                audit_event("QUARANTINE_SESSION", log["source_ip"], log.get("raw_sha256", ""))
                 st.session_state.last_action = f"Local quarantine state applied to {log['source_ip']}. No external firewall action performed."
                 st.rerun()
         with q2:
             report = incident_report(log)
             if st.download_button("⬇ Export Incident Report", data=report, file_name=f"vanguard_{log['event_id']}.json", mime="application/json", use_container_width=True):
                 st.session_state.incident_exports += 1
+                audit_event("INCIDENT_REPORT_EXPORT", log["event_id"])
                 st.session_state.last_action = f"Incident report exported for {log['event_id']}."
         if log["source_ip"] in st.session_state.quarantined_ips:
             st.markdown(f'<div class="q">● Host {html.escape(log["source_ip"])} is quarantined in session state.</div>', unsafe_allow_html=True)
@@ -183,6 +186,7 @@ with st.expander("Upload security logs", expanded=True):
                 alerts.extend(detect(event))
             alerts.extend(detect_behavior(events))
             incidents = correlate(alerts)
+            audit_event("EVIDENCE_ANALYSIS", source_name, digest)
             st.session_state.last_action = f"Uploaded evidence {uploaded.name} analyzed locally. SHA-256: {digest[:16]}…"
             u1, u2, u3, u4 = st.columns(4)
             u1.metric("Records", len(lines))
