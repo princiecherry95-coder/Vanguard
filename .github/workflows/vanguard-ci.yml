@@ -33,11 +33,14 @@ jobs:
       - name: Offline ingestion regression tests
         run: python test_ingestion.py
 
+      - name: Offline audit regression tests
+        run: python test_audit.py
+
       - name: Install runtime dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Syntax validation
-        run: python -m py_compile app.py engine.py ingestion.py test_engine.py test_ingestion.py
+        run: python -m py_compile app.py engine.py ingestion.py audit.py test_engine.py test_ingestion.py test_audit.py
 
       - name: Streamlit runtime smoke test
         shell: pwsh
