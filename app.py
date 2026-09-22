@@ -10,6 +10,12 @@ import streamlit as st
 from engine import correlate, detect, detect_behavior, parse_line
 from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, lines_from_upload, safe_uploaded_text
 from audit import audit_event
+from distributed import EventBuffer
+from firewall import block_ip
+from remediation import propose, execute_approved
+from threat_intel import ThreatIntelCache
+from windows_events import available as windows_events_available
+from local_ai import explain as local_ai_explain
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -29,6 +35,7 @@ CSS = """
 .stApp{background:#070b10;color:#e7edf5}.block-container{max-width:1500px;padding:1rem 2rem 2rem}
 .vh{border:1px solid #243241;border-radius:14px;padding:18px 22px;background:linear-gradient(135deg,#0b1118,#0a0f15);margin-bottom:14px}.vt{font-size:1.45rem;font-weight:800;letter-spacing:.04em}.vs{color:#5ee38a;font-weight:700;margin-top:4px}.metric{border:1px solid #253444;border-radius:12px;padding:14px 16px;background:#0c1219}.mv{font-size:1.5rem;font-weight:800}.ml{color:#91a1b4;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em}
 .panel{border:1px solid #253444;border-radius:14px;padding:16px;background:#0a1017;min-height:520px}.pt{font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#b8c6d6;margin-bottom:12px}.log{border:1px solid #1e2b38;border-left:4px solid #5ee38a;border-radius:8px;padding:10px 12px;margin:7px 0;background:#0d141c}.log.Critical{border-left-color:#ff4d5f}.log.Warning{border-left-color:#f6c453}.lh{display:flex;justify-content:space-between;gap:8px;font-size:.82rem}.sev{font-weight:800}.Critical .sev{color:#ff6675}.Warning .sev{color:#f6c453}.Low .sev{color:#5ee38a}.lm{color:#9aaabd;font-size:.76rem;margin-top:3px}.pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#15202b;font-size:.7rem}.box{border:1px solid #253444;border-radius:9px;padding:12px;background:#080d13;margin:9px 0}.ai{border-left:3px solid #7aa7ff;background:#0d1520;border-radius:8px;padding:12px}.q{color:#ff6675;font-weight:800}
+@media (max-width:800px){.block-container{padding:.65rem}.vh{padding:14px}.vt{font-size:1.05rem}.panel{min-height:auto;padding:12px}.log{font-size:.88rem}}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -239,6 +246,59 @@ with st.expander("Analyze local log lines", expanded=False):
         for incident in incidents:
             sources = ", ".join(sorted(x for x in incident["sources"] if x))
             st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} correlated alert(s) • Sources: {sources}')
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)
+st.caption("Optional capabilities remain local-first and require explicit configuration or analyst approval.")
+cap1, cap2, cap3 = st.columns(3)
+with cap1:
+    st.write("**Windows Event Logs**")
+    st.write("Available:" , "YES" if windows_events_available() else "NO (non-Windows)")
+    st.write("Native Security/Application/System collection is available on Windows.")
+with cap2:
+    st.write("**Offline Threat Intel**")
+    ti = ThreatIntelCache()
+    ti_ip = st.text_input("Lookup local IOC IP", value="", key="ti_ip")
+    if st.button("Lookup IOC", key="ti_lookup"):
+        try:
+            st.json(ti.lookup_ip(ti_ip))
+        except ValueError as exc:
+            st.error(f"Invalid IP: {exc}")
+with cap3:
+    st.write("**Local AI / Analyst Guidance**")
+    ai_text = st.text_area("Alert context", value="Explain this security alert defensively.", key="ai_context")
+    if st.button("Run Local AI", key="local_ai"):
+        try:
+            st.info(local_ai_explain(ai_text))
+        except Exception as exc:
+            st.error(f"Local AI unavailable: {type(exc).__name__}")
+
+st.markdown("**Human-approved remediation**")
+rp = propose(log or {})
+st.json(rp)
+approve = st.checkbox("I approve the proposed remediation", key="remediation_approval")
+if st.button("Execute Approved Remediation", disabled=not approve, key="execute_remediation"):
+    result = execute_approved({**rp, "approved": True})
+    audit_event("REMEDIATION_EXECUTION", str(result))
+    st.json(result)
+
+st.markdown("**Firewall quarantine control**")
+fw_ip = st.text_input("Source IP to quarantine", value=(log or {}).get("source_ip",""), key="fw_ip")
+fw_apply = st.checkbox("Apply to local Windows firewall", value=False, key="fw_apply")
+if st.button("Validate / Quarantine IP", key="fw_button"):
+    try:
+        result = block_ip(fw_ip, apply=fw_apply)
+        audit_event("FIREWALL_ACTION", fw_ip)
+        st.json(result)
+    except ValueError as exc:
+        st.error(f"Rejected: {exc}")
+
+st.markdown("**Distributed local ingestion buffer**")
+buffer = EventBuffer()
+buffer.add({"source":"dashboard","timestamp":datetime.now(timezone.utc).isoformat()})
+st.metric("Local buffer capacity", 50000)
+st.caption("Bounded in-memory buffering prevents unbounded ingestion growth.")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
