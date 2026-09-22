@@ -69,7 +69,7 @@ def sanitize(raw: str) -> str:
     raw = "".join(ch for ch in raw if ch in "\t\n\r" or ord(ch) >= 32)
     for pattern, replacement in SENSITIVE_PATTERNS:
         raw = pattern.sub(replacement, raw)
-    return raw
+    return raw[:MAX_LINE_LENGTH]
 
 def _timestamp(value: str | None) -> datetime:
     if value:
