@@ -182,9 +182,22 @@ def detect_behavior(events: Iterable[NormalizedEvent], window_seconds: int = 120
     alerts: list[Alert] = []
     failures: dict[str, deque[NormalizedEvent]] = defaultdict(deque)
     targets: dict[str, deque[tuple[datetime, str]]] = defaultdict(deque)
+    distributed_failures: deque[NormalizedEvent] = deque()
 
     for event in ordered:
         if event.action == "LOGIN_FAILURE" and event.source_ip:
+            distributed_failures.append(event)
+            while distributed_failures and (event.timestamp - distributed_failures[0].timestamp).total_seconds() > window_seconds:
+                distributed_failures.popleft()
+            unique_sources = {x.source_ip for x in distributed_failures if x.source_ip}
+            if len(distributed_failures) >= failure_threshold and len(unique_sources) >= 2 and not any(
+                a.rule_id == "DISTRIBUTED_BRUTE_FORCE" for a in alerts
+            ):
+                alerts.append(Alert(
+                    "DISTRIBUTED_BRUTE_FORCE", "HIGH", "Distributed brute-force authentication pattern",
+                    f"{len(distributed_failures)} failed authentication events from {len(unique_sources)} sources within {window_seconds} seconds.",
+                    event, {"failure_count": len(distributed_failures), "unique_sources": len(unique_sources),
+                            "window_seconds": window_seconds}))
             q = failures[event.source_ip]
             q.append(event)
             while q and (event.timestamp - q[0].timestamp).total_seconds() > window_seconds:
