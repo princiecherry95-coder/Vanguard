@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import html
+import io
 import json
+import zipfile
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -75,6 +79,43 @@ def incident_report(log: dict) -> bytes:
         "console_state": {"network": "DISCONNECTED", "telemetry": "LOCAL", "external_apis": False},
     }
     return json.dumps(report, indent=2).encode("utf-8")
+
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_UPLOAD_TYPES = {"txt", "log", "csv", "json", "jsonl", "xml"}
+
+
+def _safe_uploaded_text(uploaded_file) -> tuple[str, str]:
+    """Read an uploaded log as bounded text without executing uploaded content."""
+    data = uploaded_file.getvalue()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError("File exceeds the 10 MB safety limit.")
+    digest = hashlib.sha256(data).hexdigest()
+    name = uploaded_file.name or "uploaded.log"
+    suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
+    if suffix not in ALLOWED_UPLOAD_TYPES:
+        raise ValueError(f"Unsupported log format: .{suffix}")
+    if b"\\x00" in data:
+        raise ValueError("Binary content detected. Upload a text log export, CSV, JSON, JSONL or XML file.")
+    text = data.decode("utf-8-sig", errors="replace")
+    return text[:MAX_LINE_LENGTH * 100], digest
+
+
+def _lines_from_upload(text: str, fmt: str) -> list[str]:
+    if fmt in {"JSON", "JSONL"}:
+        lines = []
+        if fmt == "JSONL":
+            source = text.splitlines()
+        else:
+            parsed = json.loads(text)
+            source = parsed if isinstance(parsed, list) else [parsed]
+        for item in source:
+            lines.append(json.dumps(item, separators=(",", ":"), ensure_ascii=False) if isinstance(item, (dict, list)) else str(item))
+        return lines
+    if fmt == "CSV":
+        rows = csv.DictReader(io.StringIO(text))
+        return [json.dumps(row, ensure_ascii=False) for row in rows]
+    return [line for line in text.splitlines() if line.strip()]
 
 
 init_state()
@@ -154,6 +195,58 @@ with right:
             reset_demo()
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+st.markdown('<div class="panel"><div class="pt">Log Ingestion Center</div>', unsafe_allow_html=True)
+st.caption("Upload local security logs for bounded, sanitized, offline analysis. Uploaded content is never executed.")
+with st.expander("Upload security logs", expanded=True):
+    uploaded = st.file_uploader("Choose a local log file", type=sorted(ALLOWED_UPLOAD_TYPES), accept_multiple_files=False)
+    fmt = st.selectbox("Format", ["AUTO", "TEXT / SYSLOG", "CSV", "JSON", "JSONL", "XML"])
+    source_name = st.text_input("Source", value="Local evidence")
+    if uploaded is not None:
+        st.caption(f"Evidence: {uploaded.name} • {len(uploaded.getvalue()) / 1024:.1f} KB")
+    if st.button("Analyze Uploaded Log", type="primary", disabled=uploaded is None):
+        try:
+            text, digest = _safe_uploaded_text(uploaded)
+            actual_fmt = fmt
+            if actual_fmt == "AUTO":
+                ext = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else "txt"
+                actual_fmt = {"csv":"CSV", "json":"JSON", "jsonl":"JSONL", "xml":"XML"}.get(ext, "TEXT / SYSLOG")
+            if actual_fmt == "TEXT / SYSLOG":
+                lines = _lines_from_upload(text, "TEXT")
+            elif actual_fmt == "XML":
+                lines = _lines_from_upload(text, "TEXT")
+            else:
+                lines = _lines_from_upload(text, actual_fmt)
+            if not lines:
+                raise ValueError("No non-empty records were found.")
+            if len(lines) > 50000:
+                raise ValueError("Record limit exceeded: maximum 50,000 records per upload.")
+            events = [parse_line(line, source_name) for line in lines]
+            alerts = []
+            for event in events:
+                alerts.extend(detect(event))
+            alerts.extend(detect_behavior(events))
+            incidents = correlate(alerts)
+            st.session_state.last_action = f"Uploaded evidence {uploaded.name} analyzed locally. SHA-256: {digest[:16]}…"
+            u1, u2, u3, u4 = st.columns(4)
+            u1.metric("Records", len(lines))
+            u2.metric("Parsed", len(events))
+            u3.metric("Alerts", len(alerts))
+            u4.metric("Incidents", len(incidents))
+            st.success(f"Analysis complete: {uploaded.name} • SHA-256 {digest}")
+            if alerts:
+                for alert in alerts:
+                    st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
+            else:
+                st.info("No configured detection rules matched the uploaded telemetry.")
+            for incident in incidents:
+                sources = ", ".join(sorted(x for x in incident["sources"] if x))
+                st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} alert(s) • Sources: {sources}')
+        except (ValueError, UnicodeError, json.JSONDecodeError, csv.Error) as exc:
+            st.error(f"Upload rejected safely: {exc}")
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 
 st.markdown('<div class="panel"><div class="pt">Local SOC Analytics Engine</div>', unsafe_allow_html=True)
