@@ -1,26 +1,40 @@
 """Append-only local audit trail for Vanguard-SIEM analyst actions.
 
-The audit record stores action metadata only; raw telemetry, credentials and tokens
-are intentionally excluded. The file is local to the offline deployment.
+The audit record stores bounded action metadata only; raw telemetry, credentials
+and tokens are intentionally excluded. The file is local to the offline deployment.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 AUDIT_PATH = Path(os.environ.get("VANGUARD_AUDIT_PATH", "vanguard_audit.jsonl"))
 MAX_ACTION_LENGTH = 256
 
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(password|passwd|pwd)\s*=\s*[^\s,;]+"),
+    re.compile(r"(?i)(token|api[_-]?key|secret)\s*=\s*[^\s,;]+"),
+    re.compile(r"(?i)authorization\s*:\s*bearer\s+[^\s,;]+"),
+)
+
+
+def _sanitize_metadata(value: object) -> str:
+    text = str(value)
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(lambda match: f"{match.group(0).split('=', 1)[0] if '=' in match.group(0) else 'authorization'}=[REDACTED]", text)
+    return text[:MAX_ACTION_LENGTH]
+
 
 def audit_event(action: str, target: str = "", evidence_sha256: str = "") -> str:
-    """Append one bounded, integrity-hashed audit record and return its hash."""
+    """Append one bounded, sanitized, integrity-hashed audit record and return its hash."""
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "action": str(action)[:MAX_ACTION_LENGTH],
-        "target": str(target)[:MAX_ACTION_LENGTH],
+        "action": _sanitize_metadata(action),
+        "target": _sanitize_metadata(target),
         "evidence_sha256": str(evidence_sha256)[:64],
     }
     canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
