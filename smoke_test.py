@@ -24,6 +24,9 @@ REQUIRED = (
     "NETWORK DISCONNECTED",
     "external_apis",
     "html.escape",
+    "Log Ingestion Center",
+    "st.file_uploader",
+    "Analyze Uploaded Log",
 )
 
 
@@ -59,6 +62,7 @@ def main() -> None:
     assert "requests" not in SOURCE and "urllib.request" not in SOURCE, "Unexpected outbound HTTP client"
     assert "http://" not in SOURCE and "https://" not in SOURCE, "Unexpected runtime URL dependency"
     assert "subprocess" not in SOURCE and "os.system" not in SOURCE, "Unexpected command execution"
+    assert "MAX_RECORDS" in SOURCE and "ALLOWED_UPLOAD_TYPES" in SOURCE, "Missing bounded ingestion controls"
     assert SOURCE.index("st.set_page_config") < SOURCE.index("st.markdown(CSS"), "Page configuration must precede UI rendering"
     print("Vanguard-SIEM offline source smoke test: PASS")
 
