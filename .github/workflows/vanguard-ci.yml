@@ -27,11 +27,14 @@ jobs:
       - name: Offline source smoke test
         run: python smoke_test.py
 
+      - name: Offline engine regression tests
+        run: python test_engine.py
+
       - name: Install runtime dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Syntax validation
-        run: python -m py_compile app.py
+        run: python -m py_compile app.py engine.py test_engine.py
 
       - name: Streamlit runtime smoke test
         shell: pwsh
