@@ -44,6 +44,16 @@ def test_bruteforce_threshold_and_no_false_trigger_before_threshold():
     assert any(a.rule_id == "BRUTE_FORCE_AUTH" for a in alerts)
 
 
+def test_distributed_bruteforce_detects_multiple_sources():
+    base = datetime(2026, 9, 22, 11, 0, tzinfo=timezone.utc)
+    events = [
+        parse_line(event_line((base + timedelta(seconds=i * 8)).isoformat(), source=f"10.0.0.{10 + (i % 2)}"))
+        for i in range(5)
+    ]
+    alerts = detect_behavior(events)
+    assert any(a.rule_id == "DISTRIBUTED_BRUTE_FORCE" for a in alerts)
+
+
 def test_correlation_groups_same_source():
     base = datetime(2026, 9, 22, 10, 0, tzinfo=timezone.utc)
     a = parse_line(f"{base.isoformat()} 10.0.0.10 GET /search?q=' OR '1'='1' HTTP/1.1")
