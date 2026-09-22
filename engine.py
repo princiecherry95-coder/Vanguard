@@ -18,18 +18,18 @@ MAX_LINE_LENGTH = 16_384
 MAX_FIELD_LENGTH = 2_048
 
 SENSITIVE_PATTERNS = (
-    (re.compile(r"(?i)(password\\s*[=:]\\s*)[^&\\s,;]+"), r"\\1[REDACTED]"),
-    (re.compile(r"(?i)(passwd\\s*[=:]\\s*)[^&\\s,;]+"), r"\\1[REDACTED]"),
-    (re.compile(r"(?i)(token\\s*[=:]\\s*)[^&\\s,;]+"), r"\\1[REDACTED]"),
-    (re.compile(r"(?i)(authorization\\s*:\\s*bearer\\s+)[^\\s]+"), r"\\1[REDACTED]"),
-    (re.compile(r"(?i)(api[_-]?key\\s*[=:]\\s*)[^&\\s,;]+"), r"\\1[REDACTED]"),
+    (re.compile(r"(?i)(password\s*[=:]\s*)[^&\s,;]+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(passwd\s*[=:]\s*)[^&\s,;]+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(token\s*[=:]\s*)[^&\s,;]+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)[^&\s,;]+"), r"\1[REDACTED]"),
 )
 
 PATTERNS = (
-    ("SQL_INJECTION", re.compile(r"(?i)(?:union\\s+select|(?:'|%27)\\s*(?:or|and)\\s+(?:'|%27)?\\d|sleep\\s*\\(|information_schema)")),
-    ("XSS", re.compile(r"(?is)(?:<script\\b|javascript:|on(?:error|load|click)\\s*=)")),
-    ("PATH_MANIPULATION", re.compile(r"(?i)(?:\\.\\./|%2e%2e%2f|%2e%2e\\)")),
-    ("SUSPICIOUS_UPLOAD", re.compile(r"(?i)(?:filename=.*\\.(?:jsp|php|asp|aspx|exe|dll|sh|ps1)\\b|content-type=.*(?:x-httpd-php|octet-stream))")),
+    ("SQL_INJECTION", re.compile(r"(?i)(?:union\s+select|(?:'|%27)\s*(?:or|and)\s+(?:'|%27)?\d|sleep\s*\(|information_schema)")),
+    ("XSS", re.compile(r"(?is)(?:<script\b|javascript:|on(?:error|load|click)\s*=)")),
+    ("PATH_MANIPULATION", re.compile(r"(?i)(?:\.\./|%2e%2e%2f|%2e%2e\)")),
+    ("SUSPICIOUS_UPLOAD", re.compile(r"(?i)(?:filename=.*\.(?:jsp|php|asp|aspx|exe|dll|sh|ps1)\b|content-type=.*(?:x-httpd-php|octet-stream))")),
     ("AUTH_FAILURE", re.compile(r"(?i)(?:failed password|authentication failure|login failed|invalid password|bad credentials)")),
     ("PRIVILEGE_ESCALATION", re.compile(r"(?i)(?:sudo|su:|added to (?:sudo|administrators|wheel)|privilege escalation|role=admin)")),
 )
@@ -102,15 +102,15 @@ def parse_line(raw: str, source_format: str = "auto") -> NormalizedEvent:
     fields: dict[str, str] = {}
 
     # ISO timestamp, common access-log timestamp, or syslog month/day time.
-    m = re.search(r"\\b(\\d{4}-\\d{2}-\\d{2}T[^\\s]+|\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})", clean)
+    m = re.search(r"\b(\d{4}-\d{2}-\d{2}T[^\s]+|\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", clean)
     if m:
         timestamp = m.group(1)
     else:
-        m = re.search(r"\\b([A-Z][a-z]{2}\\s+\\d{1,2}\\s+\\d{2}:\\d{2}:\\d{2})\\b", clean)
+        m = re.search(r"\b([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\b", clean)
         if m:
             timestamp = m.group(1)
 
-    ips = re.findall(r"(?<![\\w.])(?:\\d{1,3}\\.){3}\\d{1,3}(?![\\w.])", clean)
+    ips = re.findall(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])", clean)
     valid_ips = [_valid_ip(x) for x in ips]
     valid_ips = [x for x in valid_ips if x]
     if valid_ips:
@@ -118,12 +118,12 @@ def parse_line(raw: str, source_format: str = "auto") -> NormalizedEvent:
     if len(valid_ips) > 1:
         destination_ip = valid_ips[1]
 
-    m = re.search(r"(?i)\\b(?:user|username|account)=?([A-Za-z0-9._@-]+)", clean)
+    m = re.search(r"(?i)\b(?:user|username|account)=?([A-Za-z0-9._@-]+)", clean)
     if m:
         user = _clip(m.group(1))
         fields["user"] = user
 
-    m = re.search(r"(?i)\\b(?:pid|process[_-]?id)=(\\d+)\\b", clean)
+    m = re.search(r"(?i)\b(?:pid|process[_-]?id)=(\d+)\b", clean)
     if m:
         pid = int(m.group(1))
 
@@ -133,9 +133,9 @@ def parse_line(raw: str, source_format: str = "auto") -> NormalizedEvent:
         event_type, action = "AUTHENTICATION", "LOGIN_SUCCESS"
     elif re.search(r"(?i)(?:sudo|privilege|added to (?:sudo|administrators|wheel))", clean):
         event_type, action = "PRIVILEGE", "PRIVILEGE_CHANGE"
-    elif re.search(r"(?i)(?:GET|POST|PUT|DELETE)\\s+\\S+\\s+HTTP/", clean):
+    elif re.search(r"(?i)(?:GET|POST|PUT|DELETE)\s+\S+\s+HTTP/", clean):
         event_type, action = "WEB", "HTTP_REQUEST"
-    elif re.search(r"(?i)(?:deny|drop|blocked|allow|accept)\\s+", clean):
+    elif re.search(r"(?i)(?:deny|drop|blocked|allow|accept)\s+", clean):
         event_type, action = "FIREWALL", "NETWORK_DECISION"
 
     return NormalizedEvent(
