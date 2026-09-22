@@ -198,7 +198,7 @@ with st.expander("Upload security logs", expanded=True):
             for incident in incidents:
                 sources = ", ".join(sorted(x for x in incident["sources"] if x))
                 st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} alert(s) • Sources: {sources}')
-        except (ValueError, UnicodeError, json.JSONDecodeError, csv.Error) as exc:
+        except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
             st.error(f"Upload rejected safely: {exc}")
 
 st.markdown('</div>', unsafe_allow_html=True)
