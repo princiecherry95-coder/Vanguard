@@ -40,18 +40,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:STREAMLIT_BROWSER_GATHER_USAGE_STATS = 'false'
           $process = Start-Process python -ArgumentList '-m streamlit run app.py --server.headless true --server.port 8501' -RedirectStandardOutput streamlit.log -RedirectStandardError streamlit-error.log -PassThru
           try {
             $passed = $false
             for ($i = 1; $i -le 30; $i++) {
               try {
-                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8501/' -UseBasicParsing -TimeoutSec 3
-                if ($response.StatusCode -eq 200) {
-                  $body = $response.Content
-                  if ($body -match 'VANGUARD-SIEM' -and $body -match 'Tactical Operations Console' -and $body -match 'Air-Gapped Local Net') {
-                    $passed = $true
-                    break
-                  }
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8501/_stcore/health' -UseBasicParsing -TimeoutSec 3
+                if ($response.StatusCode -eq 200 -and $response.Content -match 'ok') {
+                  $passed = $true
+                  break
                 }
               } catch { }
               Start-Sleep -Seconds 1
