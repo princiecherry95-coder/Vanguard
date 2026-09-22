@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
+from engine import correlate, detect, detect_behavior, parse_line
+
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
 MOCK_LOGS = [
@@ -152,5 +154,40 @@ with right:
             reset_demo()
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+st.markdown('<div class="panel"><div class="pt">Local SOC Analytics Engine</div>', unsafe_allow_html=True)
+st.caption("Offline ingestion • normalization • deterministic detection • correlation")
+
+with st.expander("Analyze local log lines", expanded=False):
+    sample = """2026-09-22T10:00:00+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:10+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:20+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:30+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:40+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:01:00+00:00 10.10.1.7 GET /search?q=' OR '1'='1' HTTP/1.1"""
+    raw_lines = st.text_area("Paste local log sample", value=sample, height=180)
+    if st.button("Analyze Locally", type="primary"):
+        lines = [line for line in raw_lines.splitlines() if line.strip()]
+        events = [parse_line(line, "local-text") for line in lines]
+        alerts = []
+        for event in events:
+            alerts.extend(detect(event))
+        alerts.extend(detect_behavior(events))
+        incidents = correlate(alerts)
+        st.session_state.last_action = f"Locally analyzed {len(events)} events and generated {len(alerts)} alerts."
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Events Parsed", len(events))
+        m2.metric("Alerts", len(alerts))
+        m3.metric("Incidents", len(incidents))
+        for alert in alerts:
+            st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
+        if not alerts:
+            st.success("No configured detection rules matched the supplied local telemetry.")
+        for incident in incidents:
+            sources = ", ".join(sorted(x for x in incident["sources"] if x))
+            st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} correlated alert(s) • Sources: {sources}')
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.caption(f"Last action: {st.session_state.last_action}  •  Reports: {st.session_state.incident_exports}  •  NETWORK DISCONNECTED  •  TELEMETRY LOCAL")
