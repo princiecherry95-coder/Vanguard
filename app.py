@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import csv
-import hashlib
 import html
-import io
 import json
-import zipfile
 from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
 from engine import correlate, detect, detect_behavior, parse_line
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, lines_from_upload, safe_uploaded_text
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -79,43 +76,6 @@ def incident_report(log: dict) -> bytes:
         "console_state": {"network": "DISCONNECTED", "telemetry": "LOCAL", "external_apis": False},
     }
     return json.dumps(report, indent=2).encode("utf-8")
-
-
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-ALLOWED_UPLOAD_TYPES = {"txt", "log", "csv", "json", "jsonl", "xml"}
-
-
-def _safe_uploaded_text(uploaded_file) -> tuple[str, str]:
-    """Read an uploaded log as bounded text without executing uploaded content."""
-    data = uploaded_file.getvalue()
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise ValueError("File exceeds the 10 MB safety limit.")
-    digest = hashlib.sha256(data).hexdigest()
-    name = uploaded_file.name or "uploaded.log"
-    suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
-    if suffix not in ALLOWED_UPLOAD_TYPES:
-        raise ValueError(f"Unsupported log format: .{suffix}")
-    if b"\\x00" in data:
-        raise ValueError("Binary content detected. Upload a text log export, CSV, JSON, JSONL or XML file.")
-    text = data.decode("utf-8-sig", errors="replace")
-    return text[:MAX_LINE_LENGTH * 100], digest
-
-
-def _lines_from_upload(text: str, fmt: str) -> list[str]:
-    if fmt in {"JSON", "JSONL"}:
-        lines = []
-        if fmt == "JSONL":
-            source = text.splitlines()
-        else:
-            parsed = json.loads(text)
-            source = parsed if isinstance(parsed, list) else [parsed]
-        for item in source:
-            lines.append(json.dumps(item, separators=(",", ":"), ensure_ascii=False) if isinstance(item, (dict, list)) else str(item))
-        return lines
-    if fmt == "CSV":
-        rows = csv.DictReader(io.StringIO(text))
-        return [json.dumps(row, ensure_ascii=False) for row in rows]
-    return [line for line in text.splitlines() if line.strip()]
 
 
 init_state()
@@ -207,20 +167,15 @@ with st.expander("Upload security logs", expanded=True):
         st.caption(f"Evidence: {uploaded.name} • {len(uploaded.getvalue()) / 1024:.1f} KB")
     if st.button("Analyze Uploaded Log", type="primary", disabled=uploaded is None):
         try:
-            text, digest = _safe_uploaded_text(uploaded)
+            text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
             actual_fmt = fmt
             if actual_fmt == "AUTO":
                 ext = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else "txt"
                 actual_fmt = {"csv":"CSV", "json":"JSON", "jsonl":"JSONL", "xml":"XML"}.get(ext, "TEXT / SYSLOG")
-            if actual_fmt == "TEXT / SYSLOG":
-                lines = _lines_from_upload(text, "TEXT")
-            elif actual_fmt == "XML":
-                lines = _lines_from_upload(text, "TEXT")
-            else:
-                lines = _lines_from_upload(text, actual_fmt)
+            lines = lines_from_upload(text, "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt)
             if not lines:
                 raise ValueError("No non-empty records were found.")
-            if len(lines) > 50000:
+            if len(lines) > MAX_RECORDS:
                 raise ValueError("Record limit exceeded: maximum 50,000 records per upload.")
             events = [parse_line(line, source_name) for line in lines]
             alerts = []
