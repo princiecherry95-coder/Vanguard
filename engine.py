@@ -203,8 +203,17 @@ def _parse_xml(clean: str, source_format: str) -> NormalizedEvent | None:
     except ET.ParseError:
         return None
     values = {}
+    aliases = {
+        "timecreated": "timestamp", "createdat": "timestamp", "datetime": "timestamp",
+        "sourceip": "source_ip", "srcip": "source_ip", "clientip": "source_ip",
+        "destinationip": "destination_ip", "destip": "destination_ip", "serverip": "destination_ip",
+        "username": "user", "accountname": "user", "eventtype": "event_type",
+        "eventaction": "action", "message": "message", "msg": "message",
+        "severity": "severity", "level": "severity",
+    }
     for elem in root.iter():
-        key = elem.tag.rsplit("}", 1)[-1].lower()
+        raw_key = elem.tag.rsplit("}", 1)[-1].lower()
+        key = aliases.get(raw_key, raw_key)
         if elem.text and elem.text.strip():
             values.setdefault(key, elem.text.strip())
     if not values:
