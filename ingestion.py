@@ -82,4 +82,13 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
         return [json.dumps(item, ensure_ascii=False) for item in source]
     if fmt == "CSV":
         return [json.dumps(row, ensure_ascii=False) for row in csv.DictReader(io.StringIO(text))]
+    if fmt == "XML":
+        # Preserve a complete XML document as one evidence record. If the
+        # source is a line-oriented XML export, fall back to non-empty lines.
+        try:
+            import xml.etree.ElementTree as ET
+            ET.fromstring(text)
+            return [text.strip()] if text.strip() else []
+        except ET.ParseError:
+            return [line for line in text.splitlines() if line.strip()]
     return [line for line in text.splitlines() if line.strip()]
