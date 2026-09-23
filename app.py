@@ -53,6 +53,8 @@ def init_state() -> None:
         "telemetry_source": "No local evidence loaded",
         "analysis_summary": None,
         "analysis_result": None,
+        "analysis_state": "IDLE",
+        "analysis_completed_at": None,
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
     }
@@ -119,6 +121,23 @@ high = int((_df["severity"].isin(["HIGH", "WARNING"])).sum()) if not _df.empty e
 for col, value, label in zip(metrics, [len(_df), critical, high, len(st.session_state.quarantined_ips)], ["Total Log Entries", "Critical Anomalies", "High / Warning Alerts", "Quarantined Hosts"]):
     with col:
         st.markdown(f'<div class="metric"><div class="mv">{value}</div><div class="ml">{label}</div></div>', unsafe_allow_html=True)
+
+# Persisted analysis status: the main dashboard is rebuilt from the uploaded evidence.
+if st.session_state.analysis_summary:
+    summary = st.session_state.analysis_summary
+    status_label = "ANALYSIS COMPLETE" if st.session_state.analysis_state == "COMPLETE" else st.session_state.analysis_state
+    st.success(f"✓ {status_label} • {st.session_state.telemetry_source}")
+    a1, a2, a3, a4, a5 = st.columns(5)
+    a1.metric("Analyzed Records", len(st.session_state.logs))
+    a2.metric("Parsed", len(st.session_state.analysis_result["events"]) if st.session_state.analysis_result else 0)
+    a3.metric("Alerts", len(st.session_state.analysis_result["alerts"]) if st.session_state.analysis_result else 0)
+    a4.metric("Incidents", len(st.session_state.analysis_result["incidents"]) if st.session_state.analysis_result else 0)
+    a5.metric("Risk Score", summary["risk_score"])
+    st.caption(f"Parse coverage {summary['parse_coverage']:.1f}% • {summary['unique_sources']} unique source(s) • {summary['unique_destinations']} unique destination(s) • Completed {st.session_state.analysis_completed_at or 'now'}")
+    if summary["rule_counts"]:
+        st.dataframe(pd.DataFrame([{"Detection Rule": k, "Matches": v} for k, v in sorted(summary["rule_counts"].items(), key=lambda x: (-x[1], x[0]))]), use_container_width=True, hide_index=True)
+    else:
+        st.info("Analysis completed. No configured detection rule matched the uploaded evidence.")
 
 left, right = st.columns([1.35, 1], gap="large")
 with left:
@@ -190,6 +209,8 @@ with st.expander("Upload security logs", expanded=True):
         st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • limit 1,024 MB")
     if st.button("Analyze Uploaded Log", type="primary", disabled=uploaded is None):
         try:
+            st.session_state.analysis_state = "ANALYZING"
+            st.session_state.last_action = f"Analyzing {uploaded.name} locally…"
             text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
             actual_fmt = fmt
             if actual_fmt == "AUTO":
@@ -234,9 +255,11 @@ with st.expander("Upload security logs", expanded=True):
                 "risk_score": analysis["risk_score"], "parse_coverage": analysis["parse_coverage"],
                 "unique_sources": len(analysis["unique_sources"]), "unique_destinations": len(analysis["unique_destinations"]),
                 "rule_counts": analysis["rule_counts"], "severity_counts": analysis["severity_counts"]}
+            st.session_state.analysis_state = "COMPLETE"
+            st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
             audit_event("EVIDENCE_ANALYSIS", source_name, digest)
-            st.session_state.last_action = f"Uploaded evidence {uploaded.name} analyzed locally. SHA-256: {digest[:16]}…"
-            st.success(f"Analysis complete: {uploaded.name} • SHA-256 {digest}")
+            st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from local evidence. SHA-256: {digest[:16]}…"
+            st.rerun()
             u1, u2, u3, u4, u5 = st.columns(5)
             u1.metric("Records", len(lines))
             u2.metric("Parsed", len(events))
@@ -261,6 +284,9 @@ with st.expander("Upload security logs", expanded=True):
                 sources = ", ".join(sorted(x for x in incident["sources"] if x))
                 st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} alert(s) • Sources: {sources}')
         except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            st.session_state.analysis_state = "FAILED"
+            st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
+            st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {exc}"
             st.error(f"Upload rejected safely: {exc}")
 
 st.markdown('</div>', unsafe_allow_html=True)
