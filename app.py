@@ -56,6 +56,8 @@ def init_state() -> None:
         "analysis_state": "IDLE",
         "analysis_completed_at": None,
         "analysis_evidence_sha256": None,
+        "validation_summary": None,
+        "validation_key": None,
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
     }
@@ -215,68 +217,119 @@ with st.expander("Upload security logs", expanded=True):
     if uploaded is not None:
         size_mb = uploaded.size / (1024 * 1024) if getattr(uploaded, "size", None) else len(uploaded.getvalue()) / (1024 * 1024)
         st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • limit 1,024 MB")
-    if st.button("Analyze Uploaded Log", type="primary", disabled=uploaded is None):
-        try:
-            st.session_state.analysis_state = "ANALYZING"
-            st.session_state.last_action = f"Analyzing {uploaded.name} locally…"
-            text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
-            actual_fmt = fmt
-            if actual_fmt == "AUTO":
-                actual_fmt = infer_upload_format(text, uploaded.name)
-            if actual_fmt == "JSONL":
-                st.info("Detected JSON Lines (one JSON object per line); processing as JSONL.")
-            lines = lines_from_upload(text, "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt)
-            if not lines:
-                raise ValueError("No non-empty records were found.")
-            if len(lines) > MAX_RECORDS:
-                raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
-            events = [parse_line(line, actual_fmt) for line in lines]
-            analysis = analyze_events(events)
-            alerts = analysis["alerts"]
-            incidents = analysis["incidents"]
-            # Replace dashboard training data with the actual analyzed evidence.
-            alerts_by_event = {}
-            for alert in alerts:
-                alerts_by_event.setdefault(id(alert.event), []).append(alert)
-            live_logs = []
-            for index, event in enumerate(events, start=1):
-                event_alerts = alerts_by_event.get(id(event), [])
-                primary = max(event_alerts, key=lambda a: {"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}.get(a.severity,0), default=None)
-                live_logs.append({
-                    "timestamp": event.timestamp.isoformat(),
-                    "event_id": f"EVT-{event.raw_sha256[:10].upper()}" if event.raw_sha256 else f"EVT-LOCAL-{index:06d}",
-                    "source_ip": event.source_ip or "N/A",
-                    "severity": primary.severity if primary else (event.severity or "LOW"),
-                    "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
-                    "attack_type": primary.title if primary else (event.action or event.event_type),
-                    "raw_payload": event.message,
-                    "description": primary.reason if primary else "No configured detection rule matched this event.",
-                    "raw_sha256": event.raw_sha256,
-                    "source_format": event.source_format,
-                })
-            st.session_state.logs = live_logs
-            st.session_state.selected_event = live_logs[0]["event_id"] if live_logs else None
-            st.session_state.telemetry_source = f"{uploaded.name} • {len(live_logs):,} records"
-            st.session_state.demo_mode = False
-            st.session_state.analysis_result = analysis
-            st.session_state.analysis_summary = {
-                "risk_score": analysis["risk_score"], "parse_coverage": analysis["parse_coverage"],
-                "unique_sources": len(analysis["unique_sources"]), "unique_destinations": len(analysis["unique_destinations"]),
-                "rule_counts": analysis["rule_counts"], "severity_counts": analysis["severity_counts"]}
-            st.session_state.analysis_state = "COMPLETE"
-            st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
-            st.session_state.analysis_evidence_sha256 = digest
-            audit_event("EVIDENCE_ANALYSIS", source_name, digest)
-            st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from local evidence. SHA-256: {digest[:16]}…"
-            # Streamlit reruns the script immediately, so persisted state above is the
-            # single source of truth for the dashboard. Rendering below the rerun was
-            # unreachable and made successful analysis look like it produced no result.
-            st.rerun()
-        except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
-            st.session_state.analysis_state = "FAILED"
-            st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
-            st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {exc}"
-            st.error(f"Upload rejected safely: {exc}")
+    current_upload_key = f"{uploaded.name}:{getattr(uploaded, 'size', 0)}" if uploaded is not None else None
+    if uploaded is not None and st.session_state.validation_key != current_upload_key:
+        st.session_state.validation_summary = None
+        st.session_state.validation_key = None
+        st.session_state.analysis_state = "IDLE"
+
+    st.markdown("**Evidence workflow**")
+    st.caption("UPLOAD → VALIDATE → ANALYZE → COMPLETE. Analysis is locked until validation passes.")
+
+    vcol, acol = st.columns(2)
+    with vcol:
+        if st.button("1. Validate Evidence", use_container_width=True, disabled=uploaded is None):
+            try:
+                raw_bytes = uploaded.getvalue()
+                text, digest = safe_uploaded_text(raw_bytes, uploaded.name)
+                actual_fmt = fmt if fmt != "AUTO" else infer_upload_format(text, uploaded.name)
+                parse_fmt = "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt
+                lines = lines_from_upload(text, parse_fmt)
+                if not lines:
+                    raise ValueError("No non-empty records were found.")
+                if len(lines) > MAX_RECORDS:
+                    raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
+                events = [parse_line(line, actual_fmt) for line in lines]
+                parsed = sum(1 for event in events if event.timestamp or event.source_ip or event.destination_ip or event.event_type or event.message)
+                coverage = (parsed / len(events) * 100) if events else 0.0
+                source_formats = sorted({event.source_format for event in events if event.source_format})
+                self_check = all(bool(event.raw_sha256) for event in events)
+                if not self_check:
+                    raise ValueError("Evidence integrity check failed: one or more records has no SHA-256 fingerprint.")
+                st.session_state.validation_summary = {
+                    "filename": uploaded.name,
+                    "format": actual_fmt,
+                    "records": len(lines),
+                    "parsed": parsed,
+                    "parse_coverage": coverage,
+                    "sha256": digest,
+                    "source_formats": source_formats,
+                }
+                st.session_state.validation_key = current_upload_key
+                st.session_state.analysis_state = "VALIDATED"
+                st.session_state.last_action = f"Evidence validation passed for {uploaded.name}. Analysis is now unlocked."
+            except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+                st.session_state.validation_summary = None
+                st.session_state.validation_key = None
+                st.session_state.analysis_state = "VALIDATION FAILED"
+                st.session_state.last_action = f"Validation failed safely for {uploaded.name}: {exc}"
+                st.error(f"Evidence validation failed safely: {exc}")
+
+    validation = st.session_state.validation_summary
+    if validation:
+        st.success(f"✓ VALIDATED • {validation['records']:,} records • {validation['parse_coverage']:.1f}% parse coverage • SHA-256 {validation['sha256'][:16]}…")
+        st.caption(f"Format: {validation['format']} • Parser: {', '.join(validation['source_formats']) or 'local-text'} • Evidence integrity: PASS")
+    else:
+        st.info("Validation required. The file will not enter the SOC analysis engine until validation passes.")
+
+    with acol:
+        analyze_disabled = uploaded is None or not validation or st.session_state.validation_key != current_upload_key
+        if st.button("2. Analyze Validated Evidence", type="primary", use_container_width=True, disabled=analyze_disabled):
+            try:
+                st.session_state.analysis_state = "ANALYZING"
+                st.session_state.last_action = f"Analyzing validated evidence {uploaded.name} locally…"
+                text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
+                if digest != validation["sha256"]:
+                    raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
+                actual_fmt = validation["format"]
+                lines = lines_from_upload(text, "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt)
+                if not lines:
+                    raise ValueError("No non-empty records were found.")
+                if len(lines) > MAX_RECORDS:
+                    raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
+                events = [parse_line(line, actual_fmt) for line in lines]
+                analysis = analyze_events(events)
+                alerts = analysis["alerts"]
+                incidents = analysis["incidents"]
+                alerts_by_event = {}
+                for alert in alerts:
+                    alerts_by_event.setdefault(id(alert.event), []).append(alert)
+                live_logs = []
+                for index, event in enumerate(events, start=1):
+                    event_alerts = alerts_by_event.get(id(event), [])
+                    primary = max(event_alerts, key=lambda a: {"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}.get(a.severity,0), default=None)
+                    live_logs.append({
+                        "timestamp": event.timestamp.isoformat(),
+                        "event_id": f"EVT-{event.raw_sha256[:10].upper()}" if event.raw_sha256 else f"EVT-LOCAL-{index:06d}",
+                        "source_ip": event.source_ip or "N/A",
+                        "severity": primary.severity if primary else (event.severity or "LOW"),
+                        "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
+                        "attack_type": primary.title if primary else (event.action or event.event_type),
+                        "raw_payload": event.message,
+                        "description": primary.reason if primary else "No configured detection rule matched this event.",
+                        "raw_sha256": event.raw_sha256,
+                        "source_format": event.source_format,
+                    })
+                st.session_state.logs = live_logs
+                st.session_state.selected_event = live_logs[0]["event_id"] if live_logs else None
+                st.session_state.telemetry_source = f"{uploaded.name} • {len(live_logs):,} records"
+                st.session_state.demo_mode = False
+                st.session_state.analysis_result = analysis
+                st.session_state.analysis_summary = {
+                    "risk_score": analysis["risk_score"], "parse_coverage": analysis["parse_coverage"],
+                    "unique_sources": len(analysis["unique_sources"]), "unique_destinations": len(analysis["unique_destinations"]),
+                    "rule_counts": analysis["rule_counts"], "severity_counts": analysis["severity_counts"]}
+                st.session_state.analysis_state = "COMPLETE"
+                st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
+                st.session_state.analysis_evidence_sha256 = digest
+                audit_event("EVIDENCE_ANALYSIS", source_name, digest)
+                st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. Dashboard updated from local evidence. SHA-256: {digest[:16]}…"
+                st.rerun()
+            except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+                st.session_state.analysis_state = "FAILED"
+                st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
+                st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {exc}"
+                st.error(f"Analysis rejected safely: {exc}")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
