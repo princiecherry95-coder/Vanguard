@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from engine import analyze_events, correlate, detect, detect_behavior, detection_policy, parse_line
-from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, infer_upload_format, lines_from_upload, safe_uploaded_text
+from engine import detection_policy
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_UPLOAD_BYTES
 from audit import audit_event
 from distributed import EventBuffer
 from firewall import block_ip
