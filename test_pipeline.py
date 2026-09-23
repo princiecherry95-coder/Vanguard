@@ -48,6 +48,12 @@ def main():
     assert incremental["records"] == 2
     assert progress == [(1, 2), (2, 2)]
     assert incremental["sha256"] == validation["sha256"]
+
+    malformed = b"2026-09-23T10:03:00Z normal event\n"
+    # A malformed record must not abort the incremental analysis path.
+    malformed_result = analyze_bytes_incremental(malformed, "malformed.log", "TEXT", chunk_size=1)
+    assert malformed_result["records"] == 1
+    assert malformed_result["events"][0].raw_sha256
     print("Vanguard-SIEM unified pipeline regression suite: PASS")
 
 
