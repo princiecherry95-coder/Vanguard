@@ -1,7 +1,7 @@
 """Security regression tests for the offline Vanguard detection engine."""
 from datetime import datetime, timezone, timedelta
 
-from engine import correlate, detect, detect_behavior, parse_line, sanitize
+from engine import analyze_events, correlate, detect, detect_behavior, parse_line, sanitize
 
 
 def event_line(ts, source="10.0.0.10", user="admin", extra=""):
@@ -76,6 +76,31 @@ def test_correlation_groups_same_source():
     assert len(incidents) == 1
     assert len(incidents[0]["alerts"]) == 2
 
+
+
+def test_generic_json_and_xml_fields_are_normalized():
+    j = parse_line('{"timestamp":"2026-09-22T10:00:00+00:00","src_ip":"10.1.1.7","dest_ip":"10.1.1.8","user":"analyst","message":"Failed password"}', "JSON")
+    assert j.source_ip == "10.1.1.7"
+    assert j.destination_ip == "10.1.1.8"
+    assert j.user == "analyst"
+    x = parse_line("<Event><TimeCreated>2026-09-22T10:00:00+00:00</TimeCreated><SourceIP>10.2.2.7</SourceIP><Message>Failed password</Message></Event>", "XML")
+    assert x.source_ip == "10.2.2.7"
+    assert "Failed password" in x.message
+
+
+def test_comprehensive_analysis_returns_explainable_metrics():
+    events = [
+        parse_line("2026-09-22T10:00:00+00:00 10.10.1.7 GET /search?q=' OR '1'='1' HTTP/1.1"),
+        parse_line("2026-09-22T10:00:10+00:00 sshd: Failed password for user=admin from 10.10.1.7"),
+    ]
+    result = analyze_events(events)
+    assert result["events"] == events
+    assert result["alerts"]
+    assert result["incidents"]
+    assert result["parse_coverage"] == 100.0
+    assert result["severity_counts"]["CRITICAL"] >= 1
+    assert "SQL_INJECTION" in result["rule_counts"]
+    assert 0 <= result["risk_score"] <= 100
 
 def main():
     tests = [v for k, v in globals().items() if k.startswith("test_")]
