@@ -46,10 +46,11 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 def init_state() -> None:
     defaults = {
-        "demo_mode": True,
-        "logs": [dict(x) for x in MOCK_LOGS],
+        "demo_mode": False,
+        "logs": [],
         "quarantined_ips": set(),
-        "selected_event": MOCK_LOGS[0]["event_id"],
+        "selected_event": None,
+        "telemetry_source": "No local evidence loaded",
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
     }
@@ -95,13 +96,19 @@ st.markdown('<div class="vh"><div class="vk">🛡️ CISMIC 2026 • LOCAL SOC �
 
 c1, c2 = st.columns([5, 1])
 with c1:
-    st.caption("Tactical AI-Augmented Log Intelligence Console • Local-only defensive telemetry")
+    st.caption(f"Live local telemetry • {html.escape(st.session_state.telemetry_source)} • No hard-coded operational events")
 with c2:
     demo = st.toggle("⚡ Demo Mode", value=st.session_state.demo_mode)
     if demo != st.session_state.demo_mode:
         st.session_state.demo_mode = demo
         if demo:
             reset_demo()
+        else:
+            st.session_state.logs = []
+            st.session_state.quarantined_ips = set()
+            st.session_state.selected_event = None
+            st.session_state.telemetry_source = "No local evidence loaded"
+        st.rerun()
 
 _df = dataframe()
 metrics = st.columns(4)
@@ -123,7 +130,7 @@ with left:
             st.rerun()
     view = _df if severity_filter == "ALL" else _df[_df["severity"] == severity_filter]
     if view.empty:
-        st.info("No events match the current filter.")
+        st.info("No live telemetry loaded. Upload a JSON/JSONL/log file below." if _df.empty else "No events match the current filter.")
     for row in view.to_dict("records"):
         sev = row["severity"].title()
         state = " • QUARANTINED" if row["source_ip"] in st.session_state.quarantined_ips else ""
@@ -198,8 +205,33 @@ with st.expander("Upload security logs", expanded=True):
                 alerts.extend(detect(event))
             alerts.extend(detect_behavior(events))
             incidents = correlate(alerts)
+            # Replace dashboard training data with the actual analyzed evidence.
+            alerts_by_event = {}
+            for alert in alerts:
+                alerts_by_event.setdefault(id(alert.event), []).append(alert)
+            live_logs = []
+            for index, event in enumerate(events, start=1):
+                event_alerts = alerts_by_event.get(id(event), [])
+                primary = max(event_alerts, key=lambda a: {"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}.get(a.severity,0), default=None)
+                live_logs.append({
+                    "timestamp": event.timestamp.isoformat(),
+                    "event_id": f"EVT-{event.raw_sha256[:10].upper()}" if event.raw_sha256 else f"EVT-LOCAL-{index:06d}",
+                    "source_ip": event.source_ip or "N/A",
+                    "severity": primary.severity if primary else (event.severity or "LOW"),
+                    "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
+                    "attack_type": primary.title if primary else (event.action or event.event_type),
+                    "raw_payload": event.message,
+                    "description": primary.reason if primary else "No configured detection rule matched this event.",
+                    "raw_sha256": event.raw_sha256,
+                    "source_format": event.source_format,
+                })
+            st.session_state.logs = live_logs
+            st.session_state.selected_event = live_logs[0]["event_id"] if live_logs else None
+            st.session_state.telemetry_source = f"{uploaded.name} • {len(live_logs):,} records"
+            st.session_state.demo_mode = False
             audit_event("EVIDENCE_ANALYSIS", source_name, digest)
             st.session_state.last_action = f"Uploaded evidence {uploaded.name} analyzed locally. SHA-256: {digest[:16]}…"
+            st.rerun()
             u1, u2, u3, u4 = st.columns(4)
             u1.metric("Records", len(lines))
             u2.metric("Parsed", len(events))
