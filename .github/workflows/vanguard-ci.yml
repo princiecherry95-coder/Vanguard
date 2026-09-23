@@ -1,4 +1,4 @@
-name: Vanguard-SIEM CI
+name: Vanguard-SIEM CI • Evidence Gate
 
 on:
   push:
