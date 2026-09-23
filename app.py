@@ -16,7 +16,7 @@ from remediation import propose, execute_approved
 from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
-from soc_pipeline import analyze_bytes, commit_dashboard_state, stage_status
+from soc_pipeline import analyze_bytes, commit_dashboard_state, stage_status, validate_bytes
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -222,7 +222,12 @@ with st.expander("Upload security logs", expanded=True):
     if uploaded is not None:
         size_mb = uploaded.size / (1024 * 1024) if getattr(uploaded, "size", None) else len(uploaded.getvalue()) / (1024 * 1024)
         st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • limit 1,024 MB")
-    current_upload_key = f"{uploaded.name}:{getattr(uploaded, 'size', 0)}" if uploaded is not None else None
+    current_upload_key = None
+    current_upload_digest = None
+    if uploaded is not None:
+        current_upload_bytes = uploaded.getvalue()
+        current_upload_digest = __import__("hashlib").sha256(current_upload_bytes).hexdigest()
+        current_upload_key = f"{uploaded.name}:{len(current_upload_bytes)}:{current_upload_digest}"
     if uploaded is not None and st.session_state.validation_key != current_upload_key:
         st.session_state.validation_summary = None
         st.session_state.validation_key = None
@@ -236,37 +241,17 @@ with st.expander("Upload security logs", expanded=True):
         if st.button("1. Validate Evidence", use_container_width=True, disabled=uploaded is None):
             try:
                 raw_bytes = uploaded.getvalue()
-                text, digest = safe_uploaded_text(raw_bytes, uploaded.name)
-                actual_fmt = fmt if fmt != "AUTO" else infer_upload_format(text, uploaded.name)
-                parse_fmt = "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt
-                lines = lines_from_upload(text, parse_fmt)
-                if not lines:
-                    raise ValueError("No non-empty records were found.")
-                if len(lines) > MAX_RECORDS:
-                    raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
-                events = [parse_line(line, actual_fmt) for line in lines]
-                parsed = sum(1 for event in events if event.timestamp or event.source_ip or event.destination_ip or event.event_type or event.message)
-                coverage = (parsed / len(events) * 100) if events else 0.0
-                source_formats = sorted({event.source_format for event in events if event.source_format})
-                self_check = all(bool(event.raw_sha256) for event in events)
-                if not self_check:
-                    raise ValueError("Evidence integrity check failed: one or more records has no SHA-256 fingerprint.")
-                st.session_state.validation_summary = {
-                    "filename": uploaded.name,
-                    "format": actual_fmt,
-                    "records": len(lines),
-                    "parsed": parsed,
-                    "parse_coverage": coverage,
-                    "sha256": digest,
-                    "source_formats": source_formats,
-                }
+                validation = validate_bytes(raw_bytes, uploaded.name, fmt)
+                st.session_state.validation_summary = validation
                 st.session_state.validation_key = current_upload_key
                 st.session_state.analysis_state = "VALIDATED"
+                st.session_state.pipeline_stage = "VALIDATE"
                 st.session_state.last_action = f"Evidence validation passed for {uploaded.name}. Analysis is now unlocked."
             except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
                 st.session_state.validation_summary = None
                 st.session_state.validation_key = None
                 st.session_state.analysis_state = "VALIDATION FAILED"
+                st.session_state.pipeline_stage = "FAILED"
                 st.session_state.last_action = f"Validation failed safely for {uploaded.name}: {exc}"
                 st.error(f"Evidence validation failed safely: {exc}")
 
@@ -283,15 +268,16 @@ with st.expander("Upload security logs", expanded=True):
             try:
                 st.session_state.analysis_state = "ANALYZING"
                 st.session_state.pipeline_stage = "ANALYZE"
-                st.session_state.last_action = f"Analyzing validated evidence {uploaded.name} locally…"
                 raw_bytes = uploaded.getvalue()
+                if current_upload_digest != validation["sha256"]:
+                    raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
                 bundle = analyze_bytes(raw_bytes, uploaded.name, validation["format"])
                 if bundle["sha256"] != validation["sha256"]:
                     raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
                 commit_dashboard_state(st, bundle, source_name or uploaded.name)
                 st.session_state.pipeline_history.append({"source": uploaded.name, "sha256": bundle["sha256"], "records": bundle["records"], "completed_at": bundle["completed_at"]})
                 st.session_state.analysis_state = "COMPLETE"
-                st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. All dashboard views now use the same canonical analysis context. SHA-256: {bundle['sha256'][:16]}…"
+                st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. Dashboard updated from the uploaded evidence."
                 st.rerun()
             except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
                 st.session_state.analysis_state = "FAILED"
