@@ -124,6 +124,7 @@ with c2:
         st.rerun()
 
 _df = dataframe()
+live_dashboard = st.empty()
 metrics = st.columns(4)
 critical = int((_df["severity"] == "CRITICAL").sum()) if not _df.empty else 0
 high = int((_df["severity"].isin(["HIGH", "WARNING"])).sum()) if not _df.empty else 0
@@ -336,7 +337,18 @@ with st.expander("Upload security logs", expanded=True):
                         })
                     pct = processed / total if total else 1.0
                     progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
-                    preview.dataframe(pd.DataFrame(preview_rows[-200:]), use_container_width=True, hide_index=True)
+                    live = pd.DataFrame(preview_rows)
+                    live_critical = int((live["severity"] == "CRITICAL").sum()) if not live.empty else 0
+                    live_high = int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0
+                    with live_dashboard.container():
+                        lm1, lm2, lm3, lm4 = st.columns(4)
+                        lm1.metric("Analyzed Records", processed)
+                        lm2.metric("Critical Anomalies", live_critical)
+                        lm3.metric("High / Warning", live_high)
+                        lm4.metric("Latest Event", preview_rows[-1]["event_id"] if preview_rows else "-")
+                        st.caption("LIVE ANALYSIS FEED • records are being normalized and classified as the file is processed")
+                        st.dataframe(live.tail(100), use_container_width=True, hide_index=True)
+                    preview.dataframe(live.tail(200), use_container_width=True, hide_index=True)
 
                 bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, validation["format"], on_chunk=publish_chunk)
                 progress.progress(1.0, text=f"Analysis complete • {bundle['records']:,} records")
