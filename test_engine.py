@@ -25,6 +25,19 @@ def test_parser_extracts_core_fields():
     assert event.action == "LOGIN_FAILURE"
 
 
+
+def test_suricata_eve_json_is_parsed_and_detected():
+    raw = """{"timestamp":"2026-09-22T10:00:00.000000+0000","flow_id":12345,"event_type":"alert","src_ip":"10.20.30.40","src_port":45678,"dest_ip":"10.20.30.50","dest_port":80,"proto":"TCP","alert":{"action":"allowed","signature":"ET WEB_SERVER SQL Injection Attempt","category":"Web Application Attack","severity":1},"http":{"hostname":"10.20.30.50","url":"/login","http_method":"POST"},"app_proto":"http"}"""
+    event = parse_line(raw, "JSONL")
+    assert event.source_ip == "10.20.30.40"
+    assert event.destination_ip == "10.20.30.50"
+    assert event.event_type == "ALERT"
+    assert event.action == "SURICATA_ALERT"
+    assert event.severity == "CRITICAL"
+    assert event.fields["signature"] == "ET WEB_SERVER SQL Injection Attempt"
+    rules = {a.rule_id for a in detect(event)}
+    assert "SURICATA_ALERT" in rules
+
 def test_web_attack_detection_is_deterministic():
     event = parse_line("2026-09-22T10:00:00+00:00 10.10.1.7 GET /search?q=' OR '1'='1' HTTP/1.1")
     rules = {a.rule_id for a in detect(event)}
