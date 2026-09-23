@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from engine import analyze_events, correlate, detect, detect_behavior, parse_line
+from engine import analyze_events, correlate, detect, detect_behavior, detection_policy, parse_line
 from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, infer_upload_format, lines_from_upload, safe_uploaded_text
 from audit import audit_event
 from distributed import EventBuffer
@@ -134,6 +134,11 @@ if st.session_state.analysis_summary:
     a3.metric("Alerts", len(st.session_state.analysis_result["alerts"]) if st.session_state.analysis_result else 0)
     a4.metric("Incidents", len(st.session_state.analysis_result["incidents"]) if st.session_state.analysis_result else 0)
     a5.metric("Risk Score", summary["risk_score"])
+    risk_breakdown = st.session_state.analysis_result.get("risk_breakdown", {}) if st.session_state.analysis_result else {}
+    if risk_breakdown:
+        st.caption(f"Risk composition • alert points: {risk_breakdown.get('alert_points', 0)} • incident points: {risk_breakdown.get('incident_points', 0)}")
+    policy = detection_policy()
+    st.caption(f"Detection policy • {policy['brute_force_failures']} failures / {policy['behavior_window_seconds']}s • {policy['scan_unique_destinations']} unique destinations / {policy['behavior_window_seconds']}s • correlation {policy['correlation_window_seconds']}s")
     st.caption(f"Parse coverage {summary['parse_coverage']:.1f}% • {summary['unique_sources']} unique source(s) • {summary['unique_destinations']} unique destination(s) • Completed {st.session_state.analysis_completed_at or 'now'}")
     if st.session_state.analysis_evidence_sha256:
         st.code(f"Evidence SHA-256: {st.session_state.analysis_evidence_sha256}", language="text")
