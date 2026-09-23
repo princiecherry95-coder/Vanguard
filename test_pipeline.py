@@ -34,7 +34,7 @@ def main():
     assert structured_rows[0]["source_ip"] == "10.10.1.7"
     assert structured_rows[1]["attack_type"] == "Web application injection indicator"
 
-    csv_data = b"timestamp,source_ip,message\\n2026-09-23T10:02:00+00:00,10.10.1.8,Failed password for user=admin\\n"
+    csv_data = b"timestamp,source_ip,message\n2026-09-23T10:02:00+00:00,10.10.1.8,Failed password for user=admin\n"
     csv_bundle = analyze_bytes(csv_data, "events.csv", "CSV")
     assert csv_bundle["records"] == 1
     assert csv_bundle["events"][0].source_ip == "10.10.1.8"
