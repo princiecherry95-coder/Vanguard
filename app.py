@@ -82,7 +82,7 @@ def reset_demo() -> None:
 def incident_report(log: dict) -> bytes:
     report = {
         "system": "Vanguard-SIEM",
-        "classification": "LOCAL TRAINING / HACKATHON TELEMETRY",
+        "classification": "LOCAL EVIDENCE / DEFENSIVE ANALYSIS",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "event": log,
         "response_state": "QUARANTINED" if log["source_ip"] in st.session_state.quarantined_ips else "OBSERVED",
@@ -114,8 +114,8 @@ with c2:
 _df = dataframe()
 metrics = st.columns(4)
 critical = int((_df["severity"] == "CRITICAL").sum()) if not _df.empty else 0
-warnings = int((_df["severity"] == "WARNING").sum()) if not _df.empty else 0
-for col, value, label in zip(metrics, [len(_df), critical, warnings, len(st.session_state.quarantined_ips)], ["Total Log Entries", "Critical Anomalies", "Warnings Flagged", "Quarantined Hosts"]):
+high = int((_df["severity"].isin(["HIGH", "WARNING"])).sum()) if not _df.empty else 0
+for col, value, label in zip(metrics, [len(_df), critical, high, len(st.session_state.quarantined_ips)], ["Total Log Entries", "Critical Anomalies", "High / Warning Alerts", "Quarantined Hosts"]):
     with col:
         st.markdown(f'<div class="metric"><div class="mv">{value}</div><div class="ml">{label}</div></div>', unsafe_allow_html=True)
 
@@ -124,7 +124,7 @@ with left:
     st.markdown('<div class="panel"><div class="pt">Live Security Log Stream</div>', unsafe_allow_html=True)
     fcol, rcol = st.columns([3, 1])
     with fcol:
-        severity_filter = st.selectbox("Filter", ["ALL", "CRITICAL", "WARNING", "LOW"], label_visibility="collapsed")
+        severity_filter = st.selectbox("Filter", ["ALL", "CRITICAL", "HIGH", "MEDIUM", "WARNING", "LOW"], label_visibility="collapsed")
     with rcol:
         if st.button("↻ Refresh", use_container_width=True):
             st.session_state.last_action = "Local telemetry stream refreshed."
