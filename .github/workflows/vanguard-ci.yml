@@ -33,6 +33,9 @@ jobs:
       - name: Offline ingestion regression tests
         run: python test_ingestion.py
 
+      - name: Evidence validation regression tests
+        run: python test_validation.py
+
       - name: Offline audit regression tests
         run: python test_audit.py
 
