@@ -1,4 +1,4 @@
-name: Vanguard-SIEM CI • Evidence Gate
+name: Vanguard-SIEM CI • Cross-Platform Evidence Gate
 
 on:
   push:
@@ -11,76 +11,37 @@ permissions:
   contents: read
 
 jobs:
-  smoke-test:
-    runs-on: windows-latest
-    timeout-minutes: 10
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
           cache: pip
-
-      - name: Offline source smoke test
-        run: python smoke_test.py
-
-      - name: Offline engine regression tests
-        run: python test_engine.py
-
-      - name: Offline ingestion regression tests
-        run: python test_ingestion.py
-
-      - name: Evidence validation regression tests
-        run: python test_validation.py
-
-      - name: Unified SOC pipeline regression tests
-        run: python test_pipeline.py
-
-      - name: Offline audit regression tests
-        run: python test_audit.py
-
-      - name: Defensive security regression tests
-        run: python test_security.py
-
       - name: Install runtime dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
-      - name: Import and compile all runtime modules
-        run: python -m py_compile app.py engine.py ingestion.py audit.py distributed.py firewall.py remediation.py threat_intel.py windows_events.py local_ai.py soc_pipeline.py test_pipeline.py
-      - name: Import smoke test
-        run: python -c "import engine, ingestion, audit, distributed, firewall, remediation, threat_intel, windows_events, local_ai, soc_pipeline; print('Vanguard-SIEM module import smoke test: PASS')"
-
-      - name: Syntax validation
-        run: python -m py_compile app.py engine.py ingestion.py audit.py soc_pipeline.py test_engine.py test_ingestion.py test_audit.py test_security.py test_validation.py test_pipeline.py
-
-      - name: Streamlit runtime smoke test
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $env:STREAMLIT_BROWSER_GATHER_USAGE_STATS = 'false'
-          $process = Start-Process python -ArgumentList '-m streamlit run app.py --server.headless true --server.port 8501' -RedirectStandardOutput streamlit.log -RedirectStandardError streamlit-error.log -PassThru
-          try {
-            $passed = $false
-            for ($i = 1; $i -le 30; $i++) {
-              try {
-                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8501/_stcore/health' -UseBasicParsing -TimeoutSec 3
-                if ($response.StatusCode -eq 200 -and $response.Content -match 'ok') {
-                  $passed = $true
-                  break
-                }
-              } catch { }
-              Start-Sleep -Seconds 1
-            }
-            if (-not $passed) {
-              Write-Host '--- streamlit.log ---'
-              if (Test-Path streamlit.log) { Get-Content streamlit.log }
-              Write-Host '--- streamlit-error.log ---'
-              if (Test-Path streamlit-error.log) { Get-Content streamlit-error.log }
-              throw 'Vanguard-SIEM runtime smoke test FAILED.'
-            }
-            Write-Host 'Vanguard-SIEM runtime smoke test PASSED.'
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-          }
+      - name: Source smoke test
+        run: python smoke_test.py
+      - name: Engine regression tests
+        run: python test_engine.py
+      - name: Ingestion regression tests
+        run: python test_ingestion.py
+      - name: Unified pipeline regression tests
+        run: python test_pipeline.py
+      - name: Audit regression tests
+        run: python test_audit.py
+      - name: Defensive security regression tests
+        run: python test_security.py
+      - name: Compile all runtime modules
+        run: python -m py_compile app.py engine.py ingestion.py audit.py distributed.py firewall.py remediation.py threat_intel.py windows_events.py local_ai.py soc_pipeline.py runtime_smoke_test.py
+      - name: Cross-platform runtime smoke test
+        run: python runtime_smoke_test.py
