@@ -19,6 +19,15 @@ from typing import Iterable
 MAX_LINE_LENGTH = 16_384
 MAX_FIELD_LENGTH = 2_048
 
+DETECTION_POLICY = {
+    "behavior_window_seconds": 120,
+    "brute_force_failures": 5,
+    "distributed_min_sources": 2,
+    "scan_unique_destinations": 12,
+    "correlation_window_seconds": 300,
+    "risk_incident_cap": 30,
+}
+
 SENSITIVE_PATTERNS = (
     (re.compile(r"(?i)(password\s*[=:]\s*)[^&\s,;]+"), r"\1[REDACTED]"),
     (re.compile(r"(?i)(passwd\s*[=:]\s*)[^&\s,;]+"), r"\1[REDACTED]"),
@@ -32,6 +41,9 @@ PATTERNS = (
     ("XSS", re.compile(r"(?is)(?:<script\b|javascript:|on(?:error|load|click)\s*=)")),
     ("PATH_MANIPULATION", re.compile(r"(?i)(?:\.\./|%2e%2e%2f|%2e%2e%5c)")),
     ("SUSPICIOUS_UPLOAD", re.compile(r"(?i)(?:filename=.*\.(?:jsp|php|asp|aspx|exe|dll|sh|ps1)\b|content-type=.*(?:x-httpd-php|octet-stream))")),
+    ("COMMAND_INJECTION", re.compile(r"(?i)(?:[;&|]\s*(?:bash|sh|cmd|powershell|pwsh|curl|wget)\b|/bin/(?:ba)?sh\b|powershell(?:\.exe)?\s+-enc\b)")),
+    ("SSRF_INDICATOR", re.compile(r"(?i)(?:https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0|169\.254\.169\.254)(?::\d+)?(?:/|\b))")),
+    ("ENCODED_ATTACK", re.compile(r"(?i)(?:%27|%22|%3c|%3e|%2e%2e%2f|%3b|%7c){2,}")),
     ("AUTH_FAILURE", re.compile(r"(?i)(?:failed password|authentication failure|login failed|invalid password|bad credentials)")),
     ("PRIVILEGE_ESCALATION", re.compile(r"(?i)(?:sudo|su:|added to (?:sudo|administrators|wheel)|privilege escalation|role=admin)")),
 )
@@ -312,7 +324,7 @@ def detect(event: NormalizedEvent) -> list[Alert]:
     for rule_id, pattern in PATTERNS:
         if pattern.search(message):
             severity = "HIGH"
-            if rule_id in {"SQL_INJECTION", "XSS", "PRIVILEGE_ESCALATION"}:
+            if rule_id in {"SQL_INJECTION", "XSS", "PRIVILEGE_ESCALATION", "COMMAND_INJECTION"}:
                 severity = "CRITICAL"
             title = {
                 "SQL_INJECTION": "Web application injection indicator",
@@ -321,6 +333,9 @@ def detect(event: NormalizedEvent) -> list[Alert]:
                 "SUSPICIOUS_UPLOAD": "Suspicious file upload",
                 "AUTH_FAILURE": "Authentication failure",
                 "PRIVILEGE_ESCALATION": "Privilege escalation indicator",
+                "COMMAND_INJECTION": "Command injection indicator",
+                "SSRF_INDICATOR": "Server-side request forgery indicator",
+                "ENCODED_ATTACK": "Repeated URL-encoding attack indicator",
             }[rule_id]
             alerts.append(Alert(rule_id, severity, title,
                 f"Local rule {rule_id} matched a sanitized event payload.",
@@ -328,8 +343,11 @@ def detect(event: NormalizedEvent) -> list[Alert]:
 
     return alerts
 
-def detect_behavior(events: Iterable[NormalizedEvent], window_seconds: int = 120,
-                    failure_threshold: int = 5, scan_threshold: int = 12) -> list[Alert]:
+def detect_behavior(events: Iterable[NormalizedEvent], window_seconds: int | None = None,
+                    failure_threshold: int | None = None, scan_threshold: int | None = None) -> list[Alert]:
+    window_seconds = window_seconds if window_seconds is not None else DETECTION_POLICY["behavior_window_seconds"]
+    failure_threshold = failure_threshold if failure_threshold is not None else DETECTION_POLICY["brute_force_failures"]
+    scan_threshold = scan_threshold if scan_threshold is not None else DETECTION_POLICY["scan_unique_destinations"]
     ordered = sorted(events, key=lambda e: e.timestamp)
     alerts: list[Alert] = []
     failures: dict[str, deque[NormalizedEvent]] = defaultdict(deque)
@@ -342,7 +360,7 @@ def detect_behavior(events: Iterable[NormalizedEvent], window_seconds: int = 120
             while distributed_failures and (event.timestamp - distributed_failures[0].timestamp).total_seconds() > window_seconds:
                 distributed_failures.popleft()
             unique_sources = {x.source_ip for x in distributed_failures if x.source_ip}
-            if len(distributed_failures) >= failure_threshold and len(unique_sources) >= 2 and not any(
+            if len(distributed_failures) >= failure_threshold and len(unique_sources) >= DETECTION_POLICY["distributed_min_sources"] and not any(
                 a.rule_id == "DISTRIBUTED_BRUTE_FORCE" for a in alerts
             ):
                 alerts.append(Alert(
@@ -386,7 +404,9 @@ def analyze_events(events: Iterable[NormalizedEvent]) -> dict[str, object]:
     alerts.extend(behavior_alerts)
     incidents = correlate(alerts)
     weights = {"LOW": 1, "MEDIUM": 2, "HIGH": 4, "CRITICAL": 8}
-    risk = min(100, sum(weights.get(a.severity, 1) for a in alerts) + min(30, len(incidents) * 5))
+    alert_points = sum(weights.get(a.severity, 1) for a in alerts)
+    incident_points = min(DETECTION_POLICY["risk_incident_cap"], len(incidents) * 5)
+    risk = min(100, alert_points + incident_points)
     by_severity = {level: sum(a.severity == level for a in alerts) for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW")}
     by_rule = {}
     for alert in alerts:
@@ -394,12 +414,17 @@ def analyze_events(events: Iterable[NormalizedEvent]) -> dict[str, object]:
     sources = sorted({e.source_ip for e in events if e.source_ip})
     destinations = sorted({e.destination_ip for e in events if e.destination_ip})
     return {"events": events, "alerts": alerts, "behavior_alerts": behavior_alerts, "incidents": incidents,
-            "risk_score": risk, "severity_counts": by_severity, "rule_counts": by_rule,
+            "risk_score": risk, "risk_breakdown": {"alert_points": alert_points, "incident_points": incident_points}, "severity_counts": by_severity, "rule_counts": by_rule,
             "unique_sources": sources, "unique_destinations": destinations,
             "parse_coverage": round((sum(bool(e.message) for e in events) / len(events) * 100), 1) if events else 0.0}
 
 
-def correlate(alerts: Iterable[Alert], window_seconds: int = 300) -> list[dict[str, object]]:
+def detection_policy() -> dict[str, int]:
+    return dict(DETECTION_POLICY)
+
+
+def correlate(alerts: Iterable[Alert], window_seconds: int | None = None) -> list[dict[str, object]]:
+    window_seconds = window_seconds if window_seconds is not None else DETECTION_POLICY["correlation_window_seconds"]
     grouped: list[dict[str, object]] = []
     for alert in sorted(alerts, key=lambda a: a.event.timestamp):
         attached = None
