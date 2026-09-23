@@ -64,6 +64,7 @@ def init_state() -> None:
         "pipeline_source": "No local evidence loaded",
         "pipeline_stage": "IDLE",
         "pipeline_history": [],
+        "event_buffer": EventBuffer(),
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -334,18 +335,33 @@ with cap1:
     st.write("**Windows Event Logs**")
     st.write("Available:" , "YES" if windows_events_available() else "NO (non-Windows)")
     st.write("Native Security/Application/System collection is available on Windows.")
+    if st.button("Ingest Windows Security Events", key="windows_ingest", disabled=not windows_events_available()):
+        try:
+            collected = __import__("windows_events").collect("Security", 100)
+            bundle = analyze_bytes("\n".join(collected).encode("utf-8"), "windows-security.xml", "XML")
+            commit_dashboard_state(st, bundle, "Windows Security Event Log")
+            st.session_state.pipeline_history.append({"source": "Windows Security Event Log", "sha256": bundle["sha256"], "records": bundle["records"], "completed_at": bundle["completed_at"]})
+            st.success(f"Windows events ingested into shared SOC context: {bundle["records"]} records.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Windows Event ingestion failed safely: {type(exc).__name__}")
 with cap2:
     st.write("**Offline Threat Intel**")
     ti = ThreatIntelCache()
     ti_ip = st.text_input("Lookup local IOC IP", value="", key="ti_ip")
     if st.button("Lookup IOC", key="ti_lookup"):
         try:
-            st.json(ti.lookup_ip(ti_ip))
+            intel = ti.lookup_ip(ti_ip)
+            st.json(intel)
+            if log and ti_ip == log.get("source_ip") and intel:
+                st.session_state.last_action = f"Offline IOC enrichment attached to {log["event_id"]}."
+                audit_event("IOC_LOOKUP", ti_ip)
         except ValueError as exc:
             st.error(f"Invalid IP: {exc}")
 with cap3:
     st.write("**Local AI / Analyst Guidance**")
-    ai_text = st.text_area("Alert context", value="Explain this security alert defensively.", key="ai_context")
+    default_ai = (log or {}).get("description") or "Explain this security alert defensively."
+    ai_text = st.text_area("Alert context", value=default_ai, key="ai_context")
     if st.button("Run Local AI", key="local_ai"):
         try:
             st.info(local_ai_explain(ai_text))
@@ -373,10 +389,9 @@ if st.button("Validate / Quarantine IP", key="fw_button"):
         st.error(f"Rejected: {exc}")
 
 st.markdown("**Distributed local ingestion buffer**")
-buffer = EventBuffer()
-buffer.add({"source":"dashboard","timestamp":datetime.now(timezone.utc).isoformat()})
-st.metric("Local buffer capacity", 50000)
-st.caption("Bounded in-memory buffering prevents unbounded ingestion growth.")
+st.session_state.event_buffer.add({"source": st.session_state.pipeline_source, "timestamp": datetime.now(timezone.utc).isoformat(), "stage": st.session_state.pipeline_stage})
+st.metric("Buffered events", len(st.session_state.event_buffer.snapshot()))
+st.caption("The same bounded local buffer tracks dashboard/collector activity across reruns; capacity 50,000 events.")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
