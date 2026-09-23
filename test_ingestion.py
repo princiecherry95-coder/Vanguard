@@ -1,5 +1,5 @@
 """Regression tests for secure dashboard log ingestion helpers."""
-from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, lines_from_upload, safe_uploaded_text
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, lines_from_upload, safe_uploaded_text, validate_upload_size
 
 
 def main():
@@ -19,7 +19,7 @@ def main():
     assert len(lines_from_upload('source,message\n10.0.0.1,Failed login\n', "CSV")) == 1
 
     try:
-        safe_uploaded_text(b"A" * (MAX_UPLOAD_BYTES + 1), "events.log")
+        validate_upload_size(MAX_UPLOAD_BYTES + 1)
     except ValueError:
         pass
     else:
