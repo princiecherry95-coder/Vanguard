@@ -14,11 +14,17 @@ MAX_RECORDS = 1_000_000
 ALLOWED_UPLOAD_TYPES = {"txt", "log", "csv", "json", "jsonl", "xml"}
 
 
+def validate_upload_size(size: int) -> None:
+    if size < 0:
+        raise ValueError("Upload size cannot be negative.")
+    if size > MAX_UPLOAD_BYTES:
+        raise ValueError("File exceeds the 1 GiB safety limit.")
+
+
 def safe_uploaded_text(data: bytes, filename: str) -> tuple[str, str]:
     if not isinstance(data, (bytes, bytearray)):
         raise ValueError("Upload content must be bytes.")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise ValueError("File exceeds the 1 GiB safety limit.")
+    validate_upload_size(len(data))
     name = filename or "uploaded.log"
     suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
     if suffix not in ALLOWED_UPLOAD_TYPES:
