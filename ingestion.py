@@ -37,6 +37,28 @@ def safe_uploaded_text(data: bytes, filename: str) -> tuple[str, str]:
     return bytes(data).decode("utf-8-sig", errors="replace")[:MAX_RECORDS * 1024], digest
 
 
+def infer_upload_format(text: str, filename: str = "") -> str:
+    """Infer structured upload format from content, not only the file suffix."""
+    stripped = text.lstrip()
+    if not stripped:
+        return "TEXT"
+    try:
+        json.loads(text)
+        return "JSON"
+    except json.JSONDecodeError:
+        pass
+    non_empty = [line for line in text.splitlines() if line.strip()]
+    if non_empty:
+        try:
+            for line in non_empty:
+                json.loads(line)
+            return "JSONL"
+        except json.JSONDecodeError:
+            pass
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else "txt"
+    return {"csv": "CSV", "jsonl": "JSONL", "json": "JSON", "xml": "XML"}.get(suffix, "TEXT")
+
+
 def lines_from_upload(text: str, fmt: str) -> list[str]:
     fmt = fmt.upper()
     if fmt == "JSONL":
