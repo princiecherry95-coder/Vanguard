@@ -295,13 +295,14 @@ with st.expander("Upload security logs", expanded=True):
                 st.session_state.analysis_state = "VALIDATED"
                 st.session_state.pipeline_stage = "VALIDATE"
                 st.session_state.last_action = f"Evidence validation passed for {uploaded.name}. Analysis is now unlocked."
-            except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            except Exception as exc:
                 st.session_state.validation_summary = None
                 st.session_state.validation_key = None
                 st.session_state.analysis_state = "VALIDATION FAILED"
                 st.session_state.pipeline_stage = "FAILED"
-                st.session_state.last_action = f"Validation failed safely for {uploaded.name}: {exc}"
-                st.error(f"Evidence validation failed safely: {exc}")
+                detail = f"{type(exc).__name__}: {exc}"
+                st.session_state.last_action = f"Validation failed safely for {uploaded.name}: {detail}"
+                st.error(f"Evidence validation failed safely: {detail}")
 
     validation = st.session_state.validation_summary
     if validation:
@@ -359,12 +360,13 @@ with st.expander("Upload security logs", expanded=True):
                 st.session_state.analysis_state = "COMPLETE"
                 st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. Dashboard updated from the uploaded evidence."
                 st.rerun()
-            except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            except Exception as exc:
                 st.session_state.analysis_state = "FAILED"
                 st.session_state.pipeline_stage = "FAILED"
                 st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
-                st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {exc}"
-                st.error(f"Analysis rejected safely: {exc}")
+                detail = f"{type(exc).__name__}: {exc}"
+                st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {detail}"
+                st.error(f"Analysis rejected safely: {detail}")
 
 
 st.markdown('</div>', unsafe_allow_html=True)
