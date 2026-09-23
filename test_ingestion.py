@@ -1,5 +1,5 @@
 """Regression tests for secure dashboard log ingestion helpers."""
-from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, lines_from_upload, safe_uploaded_text, validate_upload_size
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, infer_upload_format, lines_from_upload, safe_uploaded_text, validate_upload_size
 
 
 def main():
@@ -17,6 +17,10 @@ def main():
     assert len(lines_from_upload('[{"message":"one"},{"message":"two"}]', "JSON")) == 2
     assert len(lines_from_upload('{"message":"one"}\n{"message":"two"}', "JSONL")) == 2
     assert len(lines_from_upload('source,message\n10.0.0.1,Failed login\n', "CSV")) == 1
+
+    assert infer_upload_format('{"message":"one"}\n{"message":"two"}', "events.json") == "JSONL"
+    assert infer_upload_format('[{"message":"one"}, {"message":"two"}]', "events.json") == "JSON"
+    assert len(lines_from_upload('{"message":"one"}\n{"message":"two"}', "JSONL")) == 2
 
     try:
         validate_upload_size(MAX_UPLOAD_BYTES + 1)
