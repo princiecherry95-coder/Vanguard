@@ -114,6 +114,9 @@ def _parse_suricata_json(clean: str, source_format: str) -> NormalizedEvent | No
     # src_ip/dest_ip and an event-specific object such as alert/http/dns.
     event_type = str(payload.get("event_type") or "UNKNOWN")
     alert_data = payload.get("alert") if isinstance(payload.get("alert"), dict) else {}
+    # Only treat JSON as Suricata EVE when it has Suricata-specific evidence.
+    if event_type.lower() != "alert" and not alert_data and not any(key in payload for key in ("src_ip", "dest_ip", "app_proto", "flow_id")):
+        return None
     http_data = payload.get("http") if isinstance(payload.get("http"), dict) else {}
     flow_data = payload.get("flow") if isinstance(payload.get("flow"), dict) else {}
     src = _valid_ip(str(payload.get("src_ip") or flow_data.get("src_ip") or "")) 
