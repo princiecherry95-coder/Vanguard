@@ -10,6 +10,32 @@ from engine import analyze_events, parse_line
 from ingestion import MAX_RECORDS, infer_upload_format, lines_from_upload, safe_uploaded_text
 
 
+def validate_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict[str, Any]:
+    """Validate evidence before analysis and return a stable content-bound validation record."""
+    text, digest = safe_uploaded_text(data, filename)
+    actual_fmt = format_hint if format_hint != "AUTO" else infer_upload_format(text, filename)
+    parse_fmt = "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt
+    lines = lines_from_upload(text, parse_fmt)
+    if not lines:
+        raise ValueError("No non-empty records were found.")
+    if len(lines) > MAX_RECORDS:
+        raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per evidence set.")
+    events = [parse_line(line, actual_fmt) for line in lines]
+    parsed = sum(1 for event in events if event.message)
+    coverage = (parsed / len(events) * 100) if events else 0.0
+    if not all(bool(event.raw_sha256) for event in events):
+        raise ValueError("Evidence integrity check failed: one or more records has no SHA-256 fingerprint.")
+    return {
+        "filename": filename,
+        "format": actual_fmt,
+        "records": len(lines),
+        "parsed": parsed,
+        "parse_coverage": coverage,
+        "sha256": digest,
+        "source_formats": sorted({event.source_format for event in events if event.source_format}),
+    }
+
+
 def analyze_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict[str, Any]:
     """Single canonical path for upload/paste/collector evidence."""
     text, digest = safe_uploaded_text(data, filename)
