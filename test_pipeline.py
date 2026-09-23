@@ -23,7 +23,7 @@ def main():
 
     jsonl = (
         b'{"timestamp":"2026-09-23T10:01:00+00:00","src_ip":"10.10.1.7","event_type":"auth","message":"Failed password for user=admin"}\n'
-        b'{"timestamp":"2026-09-23T10:01:10+00:00","src_ip":"10.10.1.7","message":"id=42 UNION SELECT username,password FROM users --"}\n'
+        b'{"timestamp":"2026-09-23T10:01:10+00:00","src_ip":"10.10.1.7","message":"GET /search?q=\' OR \'1\'=\'1\' HTTP/1.1"}\n'
     )
     structured = analyze_bytes(jsonl, "events.jsonl", "JSONL")
     assert structured["records"] == 2
