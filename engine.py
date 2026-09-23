@@ -172,6 +172,13 @@ def _parse_generic_json(clean: str, source_format: str) -> NormalizedEvent | Non
         for key in keys:
             if key in payload and payload[key] not in (None, ""):
                 return str(payload[key])
+        # Many JSON exports wrap the actual event under event/log/data.
+        for container_key in ("event", "log", "data", "details", "attributes"):
+            container = payload.get(container_key)
+            if isinstance(container, dict):
+                for key in keys:
+                    if key in container and container[key] not in (None, ""):
+                        return str(container[key])
         return None
     src = _valid_ip(pick("source_ip", "src_ip", "source", "client_ip", "src"))
     dst = _valid_ip(pick("destination_ip", "dest_ip", "dst_ip", "destination", "server_ip", "dst"))
