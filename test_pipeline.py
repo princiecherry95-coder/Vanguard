@@ -21,10 +21,9 @@ def main():
     assert len(rows) == 2
     assert rows[0]["raw_sha256"]
 
-    # The canonical analyzer must preserve structured formats and security detections.
     jsonl = (
         b'{"timestamp":"2026-09-23T10:01:00+00:00","src_ip":"10.10.1.7","event_type":"auth","message":"Failed password for user=admin"}\n'
-        b'{"timestamp":"2026-09-23T10:01:10+00:00","src_ip":"10.10.1.7","message":"GET /search?q=\' OR \'1\'=\'1"}\n'
+        b'{"timestamp":"2026-09-23T10:01:10+00:00","src_ip":"10.10.1.7","message":"id=42 UNION SELECT username,password FROM users --"}\n'
     )
     structured = analyze_bytes(jsonl, "events.jsonl", "JSONL")
     assert structured["records"] == 2
@@ -43,17 +42,22 @@ def main():
     stages = stage_status()
     assert list(stages) == ["INGEST", "VALIDATE", "ANALYZE", "CORRELATE", "RISK", "INVESTIGATE", "RESPOND", "AUDIT"]
     assert stages["RESPOND"] == "APPROVAL_REQUIRED"
+
     progress = []
-    incremental = analyze_bytes_incremental(raw, "events.log", "TEXT", on_chunk=lambda events, processed, total: progress.append((processed, total)), chunk_size=1)
+    incremental = analyze_bytes_incremental(
+        raw, "events.log", "TEXT",
+        on_chunk=lambda events, processed, total: progress.append((processed, total)),
+        chunk_size=1,
+    )
     assert incremental["records"] == 2
     assert progress == [(1, 2), (2, 2)]
     assert incremental["sha256"] == validation["sha256"]
 
     malformed = b"2026-09-23T10:03:00Z normal event\n"
-    # A malformed record must not abort the incremental analysis path.
     malformed_result = analyze_bytes_incremental(malformed, "malformed.log", "TEXT", chunk_size=1)
     assert malformed_result["records"] == 1
     assert malformed_result["events"][0].raw_sha256
+
     print("Vanguard-SIEM unified pipeline regression suite: PASS")
 
 
