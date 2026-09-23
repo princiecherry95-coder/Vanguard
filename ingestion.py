@@ -1,4 +1,4 @@
-""""Secure local log-ingestion helpers for Vanguard-SIEM.
+"""Secure local log-ingestion helpers for Vanguard-SIEM.
 
 No uploaded content is executed and no network access is performed.
 """
@@ -29,14 +29,11 @@ def safe_uploaded_text(data: bytes, filename: str) -> tuple[str, str]:
     suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
     if suffix not in ALLOWED_UPLOAD_TYPES:
         raise ValueError(f"Unsupported log format: .{suffix}")
-    # Reject actual NUL bytes. Never execute uploaded content.
     if b"\x00" in data:
         raise ValueError(
             "Binary content detected. Upload a text log export, CSV, JSON, JSONL or XML file."
         )
     digest = hashlib.sha256(data).hexdigest()
-    # Decode the complete bounded upload. Record-count enforcement happens
-    # after format-aware record splitting, so evidence is never silently truncated.
     text = bytes(data).decode("utf-8-sig", errors="replace")
     return text, digest
 
@@ -93,4 +90,3 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
         except ET.ParseError:
             return [line for line in text.splitlines() if line.strip()]
     return [line for line in text.splitlines() if line.strip()]
-"
