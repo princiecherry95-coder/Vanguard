@@ -16,6 +16,8 @@ def main():
     assert len(lines_from_upload(text, "TEXT")) == 2
     assert len(lines_from_upload('[{"message":"one"},{"message":"two"}]', "JSON")) == 2
     assert len(lines_from_upload('{"message":"one"}\n{"message":"two"}', "JSONL")) == 2
+    assert len(lines_from_upload('{"events":[{"src_ip":"10.0.0.1","message":"Failed password"},{"src_ip":"10.0.0.2","message":"ok"}]}', "JSON")) == 2
+    assert len(lines_from_upload('{"data":[{"message":"one"},{"message":"two"}]}', "JSON")) == 2
     assert len(lines_from_upload('source,message\n10.0.0.1,Failed login\n', "CSV")) == 1
 
     assert infer_upload_format('{"message":"one"}\n{"message":"two"}', "events.json") == "JSONL"
