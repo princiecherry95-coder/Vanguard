@@ -91,7 +91,7 @@ def incident_report(log: dict) -> bytes:
 
 init_state()
 
-st.markdown('<div class="vh"><div class="vk">🛡️ CISMIC 2026 • LOCAL SOC • DEFENSIVE ANALYTICS</div><div class="vt">VANGUARD-SIEM // Tactical Operations Console</div><div class="vs">● SECURED • AIR-GAPPED LOCAL NET • EVIDENCE PROCESSING ONLINE</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="vh"><div class="vk">🛡️ CISMIC 2026 • LOCAL SOC • DEFENSIVE ANALYTICS</div><div class="vt">VANGUARD-SIEM // Tactical Operations Console</div><div class="vs">● Status: SECURED (Air-Gapped Local Net) • EVIDENCE PROCESSING ONLINE</div></div>', unsafe_allow_html=True)
 
 c1, c2 = st.columns([5, 1])
 with c1:
