@@ -1,7 +1,7 @@
 """Security regression tests for the offline Vanguard detection engine."""
 from datetime import datetime, timezone, timedelta
 
-from engine import analyze_events, correlate, detect, detect_behavior, parse_line, sanitize
+from engine import analyze_events, correlate, detect, detect_behavior, detection_policy, parse_line, sanitize
 
 
 def event_line(ts, source="10.0.0.10", user="admin", extra=""):
@@ -101,6 +101,28 @@ def test_comprehensive_analysis_returns_explainable_metrics():
     assert result["severity_counts"]["CRITICAL"] >= 1
     assert "SQL_INJECTION" in result["rule_counts"]
     assert 0 <= result["risk_score"] <= 100
+
+def test_extended_web_detection_and_policy_are_explainable():
+    payloads = [
+        ("2026-09-22T12:00:00+00:00 10.10.1.7 GET /run?x=1; powershell -enc AAA HTTP/1.1", "COMMAND_INJECTION"),
+        ("2026-09-22T12:00:01+00:00 10.10.1.7 GET /fetch?url=http://169.254.169.254/latest HTTP/1.1", "SSRF_INDICATOR"),
+    ]
+    for raw, rule in payloads:
+        alerts = detect(parse_line(raw))
+        assert any(a.rule_id == rule for a in alerts)
+        match = next(a for a in alerts if a.rule_id == rule)
+        assert match.evidence["pattern"] == rule
+    policy = detection_policy()
+    assert policy["brute_force_failures"] == 5
+    assert policy["behavior_window_seconds"] == 120
+
+
+def test_risk_breakdown_matches_reported_score():
+    event = parse_line("2026-09-22T12:00:00+00:00 10.10.1.7 GET /?q=' OR '1'='1'")
+    result = analyze_events([event])
+    breakdown = result["risk_breakdown"]
+    assert result["risk_score"] == min(100, breakdown["alert_points"] + breakdown["incident_points"])
+
 
 def main():
     tests = [v for k, v in globals().items() if k.startswith("test_")]
