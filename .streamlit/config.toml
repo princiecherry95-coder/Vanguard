@@ -1,0 +1,12 @@
+[server]
+# Allow large local evidence files for air-gapped SOC analysis.
+maxUploadSize = 1024
+maxMessageSize = 1152
+
+[theme]
+base = "dark"
+primaryColor = "#5ee38a"
+backgroundColor = "#05080c"
+secondaryBackgroundColor = "#0b1118"
+textColor = "#e7edf5"
+font = "sans serif"
