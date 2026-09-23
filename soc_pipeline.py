@@ -78,7 +78,31 @@ def analyze_bytes_incremental(data: bytes, filename: str, format_hint: str = "AU
     size = max(1, chunk_size)
     for start in range(0, total, size):
         chunk = lines[start:start + size]
-        parsed = [parse_line(line, actual_fmt) for line in chunk]
+        parsed = []
+        for line in chunk:
+            try:
+                parsed.append(parse_line(line, actual_fmt))
+            except Exception:
+                # Preserve the evidence record as an unclassified event instead of
+                # dropping it or aborting the entire analysis because one malformed row
+                # cannot be normalized.
+                from engine import NormalizedEvent
+                import hashlib
+                clean = str(line).strip()
+                parsed.append(NormalizedEvent(
+                    timestamp=datetime.now(timezone.utc),
+                    source_ip=None,
+                    destination_ip=None,
+                    user=None,
+                    process_id=None,
+                    event_type="UNPARSED",
+                    action="PARSE_ERROR",
+                    severity="LOW",
+                    message=clean[:4096],
+                    raw_sha256=hashlib.sha256(clean.encode("utf-8")).hexdigest(),
+                    source_format=actual_fmt,
+                    fields={"parse_error": "record could not be normalized"},
+                ))
         events.extend(parsed)
         if on_chunk is not None:
             on_chunk(parsed, len(events), total)
