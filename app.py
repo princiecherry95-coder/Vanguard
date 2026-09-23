@@ -263,30 +263,10 @@ with st.expander("Upload security logs", expanded=True):
             st.session_state.analysis_evidence_sha256 = digest
             audit_event("EVIDENCE_ANALYSIS", source_name, digest)
             st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from local evidence. SHA-256: {digest[:16]}…"
+            # Streamlit reruns the script immediately, so persisted state above is the
+            # single source of truth for the dashboard. Rendering below the rerun was
+            # unreachable and made successful analysis look like it produced no result.
             st.rerun()
-            u1, u2, u3, u4, u5 = st.columns(5)
-            u1.metric("Records", len(lines))
-            u2.metric("Parsed", len(events))
-            u3.metric("Alerts", len(alerts))
-            u4.metric("Incidents", len(incidents))
-            u5.metric("Risk Score", analysis["risk_score"])
-            s1, s2, s3 = st.columns(3)
-            s1.metric("Parse Coverage", f"{analysis['parse_coverage']:.1f}%")
-            s2.metric("Unique Sources", len(analysis["unique_sources"]))
-            s3.metric("Unique Destinations", len(analysis["unique_destinations"]))
-            st.markdown("#### Detection breakdown")
-            if analysis["rule_counts"]:
-                st.dataframe(pd.DataFrame([{"Rule": k, "Matches": v} for k, v in sorted(analysis["rule_counts"].items(), key=lambda x: (-x[1], x[0]))]), use_container_width=True, hide_index=True)
-            else:
-                st.info("No configured detection rules matched the uploaded telemetry.")
-            if alerts:
-                for alert in alerts:
-                    st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
-            else:
-                st.info("No configured detection rules matched the uploaded telemetry.")
-            for incident in incidents:
-                sources = ", ".join(sorted(x for x in incident["sources"] if x))
-                st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} alert(s) • Sources: {sources}')
         except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
             st.session_state.analysis_state = "FAILED"
             st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
