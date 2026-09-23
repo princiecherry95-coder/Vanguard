@@ -65,7 +65,20 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
         return [line for line in text.splitlines() if line.strip()]
     if fmt == "JSON":
         parsed = json.loads(text)
-        source = parsed if isinstance(parsed, list) else [parsed]
+        # Accept common export envelopes while preserving individual events.
+        if isinstance(parsed, list):
+            source = parsed
+        elif isinstance(parsed, dict):
+            source = None
+            for key in ("events", "logs", "records", "data", "items", "results"):
+                candidate = parsed.get(key)
+                if isinstance(candidate, list):
+                    source = candidate
+                    break
+            if source is None:
+                source = [parsed]
+        else:
+            source = [parsed]
         return [json.dumps(item, ensure_ascii=False) for item in source]
     if fmt == "CSV":
         return [json.dumps(row, ensure_ascii=False) for row in csv.DictReader(io.StringIO(text))]
