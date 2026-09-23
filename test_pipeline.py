@@ -1,5 +1,5 @@
 """Regression tests for the unified Vanguard SOC pipeline."""
-from soc_pipeline import analyze_bytes, analysis_to_logs, stage_status, validate_bytes
+from soc_pipeline import analyze_bytes, analyze_bytes_incremental, analysis_to_logs, stage_status, validate_bytes
 
 
 def main():
@@ -43,6 +43,11 @@ def main():
     stages = stage_status()
     assert list(stages) == ["INGEST", "VALIDATE", "ANALYZE", "CORRELATE", "RISK", "INVESTIGATE", "RESPOND", "AUDIT"]
     assert stages["RESPOND"] == "APPROVAL_REQUIRED"
+    progress = []
+    incremental = analyze_bytes_incremental(raw, "events.log", "TEXT", on_chunk=lambda events, processed, total: progress.append((processed, total)), chunk_size=1)
+    assert incremental["records"] == 2
+    assert progress == [(1, 2), (2, 2)]
+    assert incremental["sha256"] == validation["sha256"]
     print("Vanguard-SIEM unified pipeline regression suite: PASS")
 
 
