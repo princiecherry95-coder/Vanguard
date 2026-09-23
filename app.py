@@ -65,6 +65,7 @@ def init_state() -> None:
         "pipeline_stage": "IDLE",
         "pipeline_history": [],
         "event_buffer": EventBuffer(),
+        "dashboard_drilldown": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -126,9 +127,51 @@ _df = dataframe()
 metrics = st.columns(4)
 critical = int((_df["severity"] == "CRITICAL").sum()) if not _df.empty else 0
 high = int((_df["severity"].isin(["HIGH", "WARNING"])).sum()) if not _df.empty else 0
-for col, value, label in zip(metrics, [len(_df), critical, high, len(st.session_state.quarantined_ips)], ["Total Log Entries", "Critical Anomalies", "High / Warning Alerts", "Quarantined Hosts"]):
+metric_specs = [
+    ("Total Log Entries", len(_df), "ALL"),
+    ("Critical Anomalies", critical, "CRITICAL"),
+    ("High / Warning Alerts", high, "HIGH_WARNING"),
+    ("Quarantined Hosts", len(st.session_state.quarantined_ips), "QUARANTINED"),
+]
+for col, (label, value, target) in zip(metrics, metric_specs):
     with col:
         st.markdown(f'<div class="metric"><div class="mv">{value}</div><div class="ml">{label}</div></div>', unsafe_allow_html=True)
+        if st.button("View", key=f"metric_view_{target}", use_container_width=True, disabled=(value == 0 and target != "ALL")):
+            st.session_state.dashboard_drilldown = target
+            st.session_state.last_action = f"Dashboard drill-down opened: {label}."
+            st.rerun()
+
+if st.session_state.get("dashboard_drilldown"):
+    target = st.session_state.dashboard_drilldown
+    if target == "ALL":
+        drill = _df.copy()
+        title = "All analyzed log entries"
+    elif target == "CRITICAL":
+        drill = _df[_df["severity"] == "CRITICAL"].copy()
+        title = "Critical anomalies"
+    elif target == "HIGH_WARNING":
+        drill = _df[_df["severity"].isin(["HIGH", "WARNING"])].copy()
+        title = "High / Warning alerts"
+    else:
+        drill = _df[_df["source_ip"].isin(st.session_state.quarantined_ips)].copy() if not _df.empty else _df.copy()
+        title = "Quarantined hosts"
+    st.markdown(f"### {title}")
+    if drill.empty:
+        st.info("No records currently match this dashboard view.")
+    else:
+        drill = drill.reset_index(drop=True)
+        st.dataframe(
+            drill[["event_id", "timestamp", "severity", "source_ip", "target_endpoint", "attack_type"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        drill_options = drill["event_id"].tolist()
+        drill_current = drill_options.index(st.session_state.selected_event) if st.session_state.selected_event in drill_options else 0
+        drill_event = st.selectbox("Open event from this dashboard view", drill_options, index=drill_current, key=f"drill_select_{target}")
+        st.session_state.selected_event = drill_event
+        if st.button("Close dashboard view", key=f"close_drill_{target}", use_container_width=True):
+            st.session_state.dashboard_drilldown = None
+            st.rerun()
 
 # Persisted analysis status: the main dashboard is rebuilt from the uploaded evidence.
 if st.session_state.analysis_summary:
@@ -171,6 +214,10 @@ with left:
         sev = row["severity"].title()
         state = " • QUARANTINED" if row["source_ip"] in st.session_state.quarantined_ips else ""
         st.markdown(f'<div class="log {sev}"><div class="lh"><span>{html.escape(row["timestamp"])} · <b>{html.escape(row["event_id"])}</b></span><span class="sev">{html.escape(row["severity"])}{state}</span></div><div><b>{html.escape(row["attack_type"])}</b> <span class="pill">{html.escape(row["source_ip"])}</span></div><div class="lm">Target: {html.escape(row["target_endpoint"])}</div></div>', unsafe_allow_html=True)
+        if st.button(f"Inspect {row['event_id']}", key=f"inspect_{row['event_id']}", use_container_width=True):
+            st.session_state.selected_event = row["event_id"]
+            st.session_state.last_action = f"Event inspector opened for {row['event_id']}."
+            st.rerun()
     if not _df.empty:
         options = _df["event_id"].tolist()
         current_index = options.index(st.session_state.selected_event) if st.session_state.selected_event in options else 0
