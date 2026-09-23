@@ -58,6 +58,32 @@ def analyze_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict
     }
 
 
+def analyze_bytes_incremental(data: bytes, filename: str, format_hint: str = "AUTO", on_chunk=None, chunk_size: int = 5000):
+    """Parse evidence in bounded chunks and publish optional progress previews."""
+    text, digest = safe_uploaded_text(data, filename)
+    actual_fmt = format_hint if format_hint != "AUTO" else infer_upload_format(text, filename)
+    lines = lines_from_upload(text, actual_fmt)
+    if not lines:
+        raise ValueError("No non-empty records were found.")
+    if len(lines) > MAX_RECORDS:
+        raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per evidence set.")
+    events = []
+    total = len(lines)
+    size = max(1, chunk_size)
+    for start in range(0, total, size):
+        chunk = lines[start:start + size]
+        parsed = [parse_line(line, actual_fmt) for line in chunk]
+        events.extend(parsed)
+        if on_chunk is not None:
+            on_chunk(parsed, len(events), total)
+    analysis = analyze_events(events)
+    return {
+        "filename": filename, "format": actual_fmt, "sha256": digest, "records": total,
+        "events": events, "analysis": analysis,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def analysis_to_logs(bundle: dict[str, Any]) -> list[dict[str, Any]]:
     """Project canonical analysis into the dashboard's event representation."""
     events = bundle["events"]
