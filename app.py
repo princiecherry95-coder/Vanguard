@@ -341,7 +341,7 @@ with cap1:
             bundle = analyze_bytes("\n".join(collected).encode("utf-8"), "windows-security.xml", "XML")
             commit_dashboard_state(st, bundle, "Windows Security Event Log")
             st.session_state.pipeline_history.append({"source": "Windows Security Event Log", "sha256": bundle["sha256"], "records": bundle["records"], "completed_at": bundle["completed_at"]})
-            st.success(f"Windows events ingested into shared SOC context: {bundle["records"]} records.")
+            st.success(f"Windows events ingested into shared SOC context: {bundle['records']} records.")
             st.rerun()
         except Exception as exc:
             st.error(f"Windows Event ingestion failed safely: {type(exc).__name__}")
@@ -354,7 +354,7 @@ with cap2:
             intel = ti.lookup_ip(ti_ip)
             st.json(intel)
             if log and ti_ip == log.get("source_ip") and intel:
-                st.session_state.last_action = f"Offline IOC enrichment attached to {log["event_id"]}."
+                st.session_state.last_action = f"Offline IOC enrichment attached to {log['event_id']}."
                 audit_event("IOC_LOOKUP", ti_ip)
         except ValueError as exc:
             st.error(f"Invalid IP: {exc}")
