@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -89,9 +90,81 @@ def _valid_ip(value: str | None) -> str | None:
     except ValueError:
         return None
 
+def _parse_suricata_json(clean: str, source_format: str) -> NormalizedEvent | None:
+    try:
+        payload = json.loads(clean)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    # Suricata EVE JSON has common fields such as timestamp, event_type,
+    # src_ip/dest_ip and an event-specific object such as alert/http/dns.
+    event_type = str(payload.get("event_type") or "UNKNOWN")
+    alert_data = payload.get("alert") if isinstance(payload.get("alert"), dict) else {}
+    http_data = payload.get("http") if isinstance(payload.get("http"), dict) else {}
+    flow_data = payload.get("flow") if isinstance(payload.get("flow"), dict) else {}
+    src = _valid_ip(str(payload.get("src_ip") or flow_data.get("src_ip") or "")) 
+    dst = _valid_ip(str(payload.get("dest_ip") or flow_data.get("dest_ip") or ""))
+    timestamp_value = payload.get("timestamp")
+    timestamp = _timestamp(str(timestamp_value) if timestamp_value else None)
+    signature = str(alert_data.get("signature") or "")
+    category = str(alert_data.get("category") or "")
+    alert_action = str(alert_data.get("action") or "")
+    app_proto = str(payload.get("app_proto") or "")
+    url = str(http_data.get("url") or "")
+    method = str(http_data.get("http_method") or "")
+    user = None
+    for key in ("user", "username", "account"):
+        if payload.get(key) is not None:
+            user = _clip(str(payload[key]))
+            break
+    if user is None and isinstance(payload.get("metadata"), dict):
+        candidate = payload["metadata"].get("user")
+        if candidate is not None:
+            user = _clip(str(candidate))
+    fields = {}
+    for key in ("flow_id", "proto", "src_port", "dest_port", "app_proto"):
+        if key in payload:
+            fields[key] = _clip(str(payload[key]))
+    if signature:
+        fields["signature"] = _clip(signature)
+    if category:
+        fields["category"] = _clip(category)
+    if alert_action:
+        fields["alert_action"] = _clip(alert_action)
+    severity_value = alert_data.get("severity")
+    try:
+        numeric_severity = int(severity_value)
+    except (TypeError, ValueError):
+        numeric_severity = 0
+    severity = {1: "CRITICAL", 2: "HIGH", 3: "MEDIUM"}.get(numeric_severity, "LOW")
+    action = "SURICATA_ALERT" if event_type.lower() == "alert" or signature else ""
+    parts = [event_type, signature, category, alert_action, app_proto, method, url]
+    message = _clip(" | ".join(part for part in parts if part))
+    if not message:
+        message = _clip(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return NormalizedEvent(
+        timestamp=timestamp,
+        source_ip=src,
+        destination_ip=dst,
+        user=user,
+        process_id=None,
+        event_type=event_type.upper(),
+        action=action,
+        severity=severity,
+        message=sanitize(message),
+        raw_sha256=hashlib.sha256(clean.encode("utf-8")).hexdigest(),
+        source_format=source_format,
+        fields=fields,
+    )
+
+
 def parse_line(raw: str, source_format: str = "auto") -> NormalizedEvent:
     """Parse common syslog/auth/web/firewall-like lines without executing payloads."""
     clean = sanitize(raw)
+    structured = _parse_suricata_json(clean, source_format)
+    if structured is not None:
+        return structured
     timestamp = None
     source_ip = None
     destination_ip = None
@@ -156,6 +229,14 @@ def parse_line(raw: str, source_format: str = "auto") -> NormalizedEvent:
 def detect(event: NormalizedEvent) -> list[Alert]:
     alerts: list[Alert] = []
     message = event.message
+    if event.event_type == "ALERT" or event.action == "SURICATA_ALERT":
+        signature = event.fields.get("signature", "Suricata alert")
+        category = event.fields.get("category", "Suricata detection")
+        alerts.append(Alert(
+            "SURICATA_ALERT", event.severity if event.severity in {"LOW", "MEDIUM", "HIGH", "CRITICAL"} else "HIGH",
+            signature[:MAX_FIELD_LENGTH],
+            f"Suricata reported a signature match: {category[:MAX_FIELD_LENGTH]}.",
+            event, {"category": category, "signature": signature, "alert_action": event.fields.get("alert_action", "")}))
 
     for rule_id, pattern in PATTERNS:
         if pattern.search(message):
