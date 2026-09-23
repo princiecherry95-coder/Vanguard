@@ -10,8 +10,8 @@ from pathlib import Path
 SOURCE_PATH = Path(__file__).with_name("app.py")
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 REQUIRED = (
-    "VANGUARD-SIEM // Tactical Operations Console",
-    "Status: SECURED (Air-Gapped Local Net)",
+    "VANGUARD-SIEM // SOC INTELLIGENCE CENTER",
+    "Status: SECURED • AIR-GAPPED • OFFLINE • EVIDENCE PROCESSING ONLINE",
     'st.toggle("⚡ Demo Mode"',
     '"Total Log Entries"',
     '"Critical Anomalies"',
@@ -26,7 +26,10 @@ REQUIRED = (
     "html.escape",
     "Log Ingestion Center",
     "st.file_uploader",
-    "Analyze Uploaded Log",
+    "1. Validate Evidence",
+    "2. Analyze Validated Evidence",
+    "Validation required. The file will not enter the SOC analysis engine until validation passes.",
+    "Evidence changed after validation. Validate the current file again before analysis.",
 )
 
 
