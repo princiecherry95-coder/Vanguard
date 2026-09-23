@@ -326,15 +326,17 @@ with st.expander("Upload security logs", expanded=True):
 
                 def publish_chunk(events, processed, total):
                     for event in events:
-                        matches = detect(event)
-                        primary = max(matches, key=lambda item: {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}.get(item.severity, 0), default=None)
+                        # Preview must never call the full detection engine. The detection
+                        # engine runs once on the complete evidence set after all chunks are
+                        # parsed. This keeps the live feed fast and prevents one preview-only
+                        # exception from aborting the entire upload.
                         preview_rows.append({
                             "event_id": f"EVT-{event.raw_sha256[:10].upper()}",
                             "timestamp": event.timestamp.isoformat(),
-                            "severity": primary.severity if primary else event.severity,
+                            "severity": event.severity or "LOW",
                             "source_ip": event.source_ip or "N/A",
                             "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
-                            "attack_type": primary.title if primary else (event.action or event.event_type),
+                            "attack_type": event.action or event.event_type,
                         })
                     pct = processed / total if total else 1.0
                     progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
