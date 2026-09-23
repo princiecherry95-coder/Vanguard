@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from engine import correlate, detect, detect_behavior, parse_line
-from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, lines_from_upload, safe_uploaded_text
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, lines_from_upload, safe_uploaded_text
 from audit import audit_event
 from distributed import EventBuffer
 from firewall import block_ip
@@ -32,9 +32,12 @@ MOCK_LOGS = [
 
 CSS = """
 <style>
-.stApp{background:#070b10;color:#e7edf5}.block-container{max-width:1500px;padding:1rem 2rem 2rem}
-.vh{border:1px solid #243241;border-radius:14px;padding:18px 22px;background:linear-gradient(135deg,#0b1118,#0a0f15);margin-bottom:14px}.vt{font-size:1.45rem;font-weight:800;letter-spacing:.04em}.vs{color:#5ee38a;font-weight:700;margin-top:4px}.metric{border:1px solid #253444;border-radius:12px;padding:14px 16px;background:#0c1219}.mv{font-size:1.5rem;font-weight:800}.ml{color:#91a1b4;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em}
-.panel{border:1px solid #253444;border-radius:14px;padding:16px;background:#0a1017;min-height:520px}.pt{font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#b8c6d6;margin-bottom:12px}.log{border:1px solid #1e2b38;border-left:4px solid #5ee38a;border-radius:8px;padding:10px 12px;margin:7px 0;background:#0d141c}.log.Critical{border-left-color:#ff4d5f}.log.Warning{border-left-color:#f6c453}.lh{display:flex;justify-content:space-between;gap:8px;font-size:.82rem}.sev{font-weight:800}.Critical .sev{color:#ff6675}.Warning .sev{color:#f6c453}.Low .sev{color:#5ee38a}.lm{color:#9aaabd;font-size:.76rem;margin-top:3px}.pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#15202b;font-size:.7rem}.box{border:1px solid #253444;border-radius:9px;padding:12px;background:#080d13;margin:9px 0}.ai{border-left:3px solid #7aa7ff;background:#0d1520;border-radius:8px;padding:12px}.q{color:#ff6675;font-weight:800}
+.stApp{background:#070b10;color:#e7edf5}.block-container{max-width:1560px;padding:1.25rem 2rem 2.5rem}
+[data-testid="stAppViewContainer"]{background:radial-gradient(circle at 10% 0%,#102033 0,#070b10 35%,#05080c 100%)}
+[data-testid="stHeader"]{background:rgba(5,8,12,.75)}
+[data-testid="stMetric"]{background:linear-gradient(145deg,#101a24,#0a1118);border:1px solid #26384a;border-radius:14px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+.vh{border:1px solid #2b4054;border-radius:18px;padding:22px 26px;background:linear-gradient(135deg,rgba(16,30,43,.96),rgba(7,12,18,.98));margin-bottom:16px;box-shadow:0 14px 40px rgba(0,0,0,.28);position:relative;overflow:hidden}.vh:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(94,227,138,.05),transparent);pointer-events:none}.vk{display:flex;gap:10px;align-items:center;color:#8fa5ba;font-size:.78rem;text-transform:uppercase;letter-spacing:.14em;margin-bottom:8px}.vt{font-size:1.55rem;font-weight:850;letter-spacing:.055em}.vs{color:#5ee38a;font-weight:700;margin-top:4px}.metric{border:1px solid #253444;border-radius:14px;padding:15px 17px;background:linear-gradient(145deg,#0e171f,#0a1017);box-shadow:0 8px 22px rgba(0,0,0,.18)}.mv{font-size:1.6rem;font-weight:850}.ml{color:#91a1b4;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em}
+.panel{border:1px solid #253444;border-radius:16px;padding:18px;background:rgba(9,15,22,.94);min-height:520px;box-shadow:0 12px 32px rgba(0,0,0,.18);backdrop-filter:blur(8px)}.pt{font-weight:850;text-transform:uppercase;letter-spacing:.1em;color:#d5e1ed;margin-bottom:12px;display:flex;align-items:center;gap:8px}.log{border:1px solid #1e2b38;border-left:4px solid #5ee38a;border-radius:10px;padding:11px 13px;margin:8px 0;background:linear-gradient(100deg,#0d151e,#0a1118);transition:transform .15s ease,border-color .15s ease}.log:hover{transform:translateX(2px);border-color:#35516a}.log.Critical{border-left-color:#ff4d5f}.log.Warning{border-left-color:#f6c453}.lh{display:flex;justify-content:space-between;gap:8px;font-size:.82rem}.sev{font-weight:800}.Critical .sev{color:#ff6675}.Warning .sev{color:#f6c453}.Low .sev{color:#5ee38a}.lm{color:#9aaabd;font-size:.76rem;margin-top:3px}.pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#15202b;font-size:.7rem}.box{border:1px solid #253444;border-radius:11px;padding:13px;background:#080d13;margin:10px 0;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.ai{border-left:3px solid #7aa7ff;background:#0d1520;border-radius:8px;padding:12px}.q{color:#ff6675;font-weight:800}
 @media (max-width:800px){.block-container{padding:.65rem}.vh{padding:14px}.vt{font-size:1.05rem}.panel{min-height:auto;padding:12px}.log{font-size:.88rem}}
 </style>
 """
@@ -88,7 +91,7 @@ def incident_report(log: dict) -> bytes:
 
 init_state()
 
-st.markdown('<div class="vh"><div class="vt">🛡️ VANGUARD-SIEM // Tactical Operations Console</div><div class="vs">🟢 Status: SECURED (Air-Gapped Local Net)</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="vh"><div class="vk">🛡️ CISMIC 2026 • LOCAL SOC • DEFENSIVE ANALYTICS</div><div class="vt">VANGUARD-SIEM // Tactical Operations Console</div><div class="vs">● SECURED • AIR-GAPPED LOCAL NET • EVIDENCE PROCESSING ONLINE</div></div>', unsafe_allow_html=True)
 
 c1, c2 = st.columns([5, 1])
 with c1:
@@ -168,13 +171,14 @@ with right:
 
 
 st.markdown('<div class="panel"><div class="pt">Log Ingestion Center</div>', unsafe_allow_html=True)
-st.caption("Upload local security logs for bounded, sanitized, offline analysis. Uploaded content is never executed.")
+st.caption(f"Local evidence intake • up to {MAX_UPLOAD_BYTES / (1024**3):.0f} GiB per file • sanitized, hashed and analyzed offline. Uploaded content is never executed.")
 with st.expander("Upload security logs", expanded=True):
-    uploaded = st.file_uploader("Choose a local log file", type=sorted(ALLOWED_UPLOAD_TYPES), accept_multiple_files=False)
+    uploaded = st.file_uploader("Choose a local log file", type=sorted(ALLOWED_UPLOAD_TYPES), accept_multiple_files=False, max_upload_size=1024, help="Local files up to 1 GiB. Use .log/.txt/.jsonl for very large event streams.")
     fmt = st.selectbox("Format", ["AUTO", "TEXT / SYSLOG", "CSV", "JSON", "JSONL", "XML"])
     source_name = st.text_input("Source", value="Local evidence")
     if uploaded is not None:
-        st.caption(f"Evidence: {uploaded.name} • {len(uploaded.getvalue()) / 1024:.1f} KB")
+        size_mb = uploaded.size / (1024 * 1024) if getattr(uploaded, "size", None) else len(uploaded.getvalue()) / (1024 * 1024)
+        st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • limit 1,024 MB")
     if st.button("Analyze Uploaded Log", type="primary", disabled=uploaded is None):
         try:
             text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
