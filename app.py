@@ -16,6 +16,7 @@ from remediation import propose, execute_approved
 from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
+from soc_pipeline import analyze_bytes, commit_dashboard_state, stage_status
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -60,6 +61,9 @@ def init_state() -> None:
         "validation_key": None,
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
+        "pipeline_source": "No local evidence loaded",
+        "pipeline_stage": "IDLE",
+        "pipeline_history": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -277,59 +281,24 @@ with st.expander("Upload security logs", expanded=True):
         if st.button("2. Analyze Validated Evidence", type="primary", use_container_width=True, disabled=analyze_disabled):
             try:
                 st.session_state.analysis_state = "ANALYZING"
+                st.session_state.pipeline_stage = "ANALYZE"
                 st.session_state.last_action = f"Analyzing validated evidence {uploaded.name} locally…"
-                text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
-                if digest != validation["sha256"]:
+                raw_bytes = uploaded.getvalue()
+                bundle = analyze_bytes(raw_bytes, uploaded.name, validation["format"])
+                if bundle["sha256"] != validation["sha256"]:
                     raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
-                actual_fmt = validation["format"]
-                lines = lines_from_upload(text, "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt)
-                if not lines:
-                    raise ValueError("No non-empty records were found.")
-                if len(lines) > MAX_RECORDS:
-                    raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
-                events = [parse_line(line, actual_fmt) for line in lines]
-                analysis = analyze_events(events)
-                alerts = analysis["alerts"]
-                incidents = analysis["incidents"]
-                alerts_by_event = {}
-                for alert in alerts:
-                    alerts_by_event.setdefault(id(alert.event), []).append(alert)
-                live_logs = []
-                for index, event in enumerate(events, start=1):
-                    event_alerts = alerts_by_event.get(id(event), [])
-                    primary = max(event_alerts, key=lambda a: {"LOW":1,"MEDIUM":2,"HIGH":3,"CRITICAL":4}.get(a.severity,0), default=None)
-                    live_logs.append({
-                        "timestamp": event.timestamp.isoformat(),
-                        "event_id": f"EVT-{event.raw_sha256[:10].upper()}" if event.raw_sha256 else f"EVT-LOCAL-{index:06d}",
-                        "source_ip": event.source_ip or "N/A",
-                        "severity": primary.severity if primary else (event.severity or "LOW"),
-                        "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
-                        "attack_type": primary.title if primary else (event.action or event.event_type),
-                        "raw_payload": event.message,
-                        "description": primary.reason if primary else "No configured detection rule matched this event.",
-                        "raw_sha256": event.raw_sha256,
-                        "source_format": event.source_format,
-                    })
-                st.session_state.logs = live_logs
-                st.session_state.selected_event = live_logs[0]["event_id"] if live_logs else None
-                st.session_state.telemetry_source = f"{uploaded.name} • {len(live_logs):,} records"
-                st.session_state.demo_mode = False
-                st.session_state.analysis_result = analysis
-                st.session_state.analysis_summary = {
-                    "risk_score": analysis["risk_score"], "parse_coverage": analysis["parse_coverage"],
-                    "unique_sources": len(analysis["unique_sources"]), "unique_destinations": len(analysis["unique_destinations"]),
-                    "rule_counts": analysis["rule_counts"], "severity_counts": analysis["severity_counts"]}
+                commit_dashboard_state(st, bundle, source_name or uploaded.name)
+                st.session_state.pipeline_history.append({"source": uploaded.name, "sha256": bundle["sha256"], "records": bundle["records"], "completed_at": bundle["completed_at"]})
                 st.session_state.analysis_state = "COMPLETE"
-                st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
-                st.session_state.analysis_evidence_sha256 = digest
-                audit_event("EVIDENCE_ANALYSIS", source_name, digest)
-                st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. Dashboard updated from local evidence. SHA-256: {digest[:16]}…"
+                st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. All dashboard views now use the same canonical analysis context. SHA-256: {bundle['sha256'][:16]}…"
                 st.rerun()
             except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
                 st.session_state.analysis_state = "FAILED"
+                st.session_state.pipeline_stage = "FAILED"
                 st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
                 st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {exc}"
                 st.error(f"Analysis rejected safely: {exc}")
+
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -346,25 +315,15 @@ with st.expander("Analyze local log lines", expanded=False):
 2026-09-22T10:01:00+00:00 10.10.1.7 GET /search?q=' OR '1'='1' HTTP/1.1"""
     raw_lines = st.text_area("Paste local log sample", value=sample, height=180)
     if st.button("Analyze Locally", type="primary"):
-        lines = [line for line in raw_lines.splitlines() if line.strip()]
-        events = [parse_line(line, "local-text") for line in lines]
-        alerts = []
-        for event in events:
-            alerts.extend(detect(event))
-        alerts.extend(detect_behavior(events))
-        incidents = correlate(alerts)
-        st.session_state.last_action = f"Locally analyzed {len(events)} events and generated {len(alerts)} alerts."
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Events Parsed", len(events))
-        m2.metric("Alerts", len(alerts))
-        m3.metric("Incidents", len(incidents))
-        for alert in alerts:
-            st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
-        if not alerts:
-            st.success("No configured detection rules matched the supplied local telemetry.")
-        for incident in incidents:
-            sources = ", ".join(sorted(x for x in incident["sources"] if x))
-            st.markdown(f'**{incident["incident_id"]}** • {incident["severity"]} • {len(incident["alerts"])} correlated alert(s) • Sources: {sources}')
+        try:
+            bundle = analyze_bytes(raw_lines.encode("utf-8"), "pasted-local.log", "TEXT")
+            commit_dashboard_state(st, bundle, "Pasted local telemetry")
+            st.session_state.pipeline_history.append({"source": "Pasted local telemetry", "sha256": bundle["sha256"], "records": bundle["records"], "completed_at": bundle["completed_at"]})
+            st.success(f"Canonical pipeline analysis complete • {bundle['records']} records • risk {bundle['analysis']['risk_score']} • SHA-256 {bundle['sha256'][:16]}…")
+            st.rerun()
+        except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            st.error(f"Local analysis rejected safely: {exc}")
+
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -419,6 +378,20 @@ buffer.add({"source":"dashboard","timestamp":datetime.now(timezone.utc).isoforma
 st.metric("Local buffer capacity", 50000)
 st.caption("Bounded in-memory buffering prevents unbounded ingestion growth.")
 
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">Unified SOC Operating Modes</div>', unsafe_allow_html=True)
+st.caption("Every mode feeds the same canonical evidence → validation → analysis → correlation → risk → investigation → response → audit context. No mode maintains a separate detection engine.")
+stages = stage_status()
+mode_cols = st.columns(8)
+for col, (name, status) in zip(mode_cols, stages.items()):
+    with col:
+        st.metric(name, status)
+if st.session_state.pipeline_source != "No local evidence loaded":
+    st.success(f"Shared context: {st.session_state.pipeline_source} • {len(st.session_state.logs):,} dashboard records • SHA-256 {str(st.session_state.analysis_evidence_sha256 or '')[:16]}…")
+    st.caption("Dashboard, event inspector, incident/risk views, remediation proposal, exports and audit reference the same analyzed evidence.")
+else:
+    st.info("No shared evidence context yet. Use Demo Mode, paste local telemetry, or validate an uploaded evidence file.")
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.caption(f"Last action: {st.session_state.last_action}  •  Reports: {st.session_state.incident_exports}  •  NETWORK DISCONNECTED  •  TELEMETRY LOCAL")
