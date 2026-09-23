@@ -34,7 +34,7 @@ def safe_uploaded_text(data: bytes, filename: str) -> tuple[str, str]:
     if b"\x00" in data:
         raise ValueError("Binary content detected. Upload a text log export, CSV, JSON, JSONL or XML file.")
     digest = hashlib.sha256(data).hexdigest()
-    return bytes(data).decode("utf-8-sig", errors="replace")[:MAX_RECORDS * 1024], digest
+    # Decode the complete bounded upload. Record-count enforcement happens after\n    # format-aware record splitting, so valid evidence is never silently truncated.\n    return bytes(data).decode("utf-8-sig", errors="replace"), digest
 
 
 def infer_upload_format(text: str, filename: str = "") -> str:
