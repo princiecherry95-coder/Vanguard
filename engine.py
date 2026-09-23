@@ -9,6 +9,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import xml.etree.ElementTree as ET
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -159,12 +160,66 @@ def _parse_suricata_json(clean: str, source_format: str) -> NormalizedEvent | No
     )
 
 
+def _parse_generic_json(clean: str, source_format: str) -> NormalizedEvent | None:
+    """Normalize common JSON/CSV-export fields without executing content."""
+    try:
+        payload = json.loads(clean)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    def pick(*keys):
+        for key in keys:
+            if key in payload and payload[key] not in (None, ""):
+                return str(payload[key])
+        return None
+    src = _valid_ip(pick("source_ip", "src_ip", "source", "client_ip", "src"))
+    dst = _valid_ip(pick("destination_ip", "dest_ip", "dst_ip", "destination", "server_ip", "dst"))
+    timestamp = _timestamp(pick("timestamp", "time", "datetime", "date", "created_at"))
+    user = pick("user", "username", "account", "user_name")
+    event_type = (pick("event_type", "type", "event", "category") or "UNKNOWN").upper()
+    action = pick("action", "operation", "event_action") or ""
+    message = pick("message", "msg", "description", "raw", "log") or clean
+    fields = {k: _clip(str(v)) for k, v in payload.items() if k in {
+        "hostname", "host", "process", "process_name", "command", "path", "url",
+        "method", "status", "status_code", "src_port", "dest_port", "protocol", "proto"
+    } and v is not None}
+    severity = str(pick("severity", "level", "priority") or "LOW").upper()
+    severity = {"DEBUG":"LOW","INFO":"LOW","NOTICE":"LOW","WARNING":"MEDIUM","WARN":"MEDIUM","ERROR":"HIGH","ERR":"HIGH","CRITICAL":"CRITICAL","CRIT":"CRITICAL","HIGH":"HIGH","MEDIUM":"MEDIUM","LOW":"LOW"}.get(severity, "LOW")
+    return NormalizedEvent(timestamp, src, dst, _clip(user) if user else None, None, event_type, action, severity,
+        sanitize(_clip(message)), hashlib.sha256(clean.encode("utf-8")).hexdigest(), source_format, fields)
+
+
+def _parse_xml(clean: str, source_format: str) -> NormalizedEvent | None:
+    try:
+        root = ET.fromstring(clean)
+    except ET.ParseError:
+        return None
+    values = {}
+    for elem in root.iter():
+        key = elem.tag.rsplit("}", 1)[-1].lower()
+        if elem.text and elem.text.strip():
+            values.setdefault(key, elem.text.strip())
+    if not values:
+        return None
+    payload = json.dumps(values, ensure_ascii=False)
+    return _parse_generic_json(payload, source_format)
+
+
 def parse_line(raw: str, source_format: str = "auto") -> NormalizedEvent:
     """Parse common syslog/auth/web/firewall-like lines without executing payloads."""
     clean = sanitize(raw)
     structured = _parse_suricata_json(clean, source_format)
     if structured is not None:
         return structured
+    if source_format.upper() in {"JSON", "JSONL", "CSV"} or clean.lstrip().startswith("{"):
+        structured = _parse_generic_json(clean, source_format)
+        if structured is not None:
+            return structured
+    if source_format.upper() == "XML" or clean.lstrip().startswith("<"):
+        structured = _parse_xml(clean, source_format)
+        if structured is not None:
+            return structured
     timestamp = None
     source_ip = None
     destination_ip = None
@@ -304,6 +359,29 @@ def detect_behavior(events: Iterable[NormalizedEvent], window_seconds: int = 120
                             "window_seconds": window_seconds, "source_ip": event.source_ip}))
 
     return alerts
+
+def analyze_events(events: Iterable[NormalizedEvent]) -> dict[str, object]:
+    """Run the complete offline analysis pipeline and return explainable metrics."""
+    events = list(events)
+    alerts = []
+    for event in events:
+        alerts.extend(detect(event))
+    behavior_alerts = detect_behavior(events)
+    alerts.extend(behavior_alerts)
+    incidents = correlate(alerts)
+    weights = {"LOW": 1, "MEDIUM": 2, "HIGH": 4, "CRITICAL": 8}
+    risk = min(100, sum(weights.get(a.severity, 1) for a in alerts) + min(30, len(incidents) * 5))
+    by_severity = {level: sum(a.severity == level for a in alerts) for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW")}
+    by_rule = {}
+    for alert in alerts:
+        by_rule[alert.rule_id] = by_rule.get(alert.rule_id, 0) + 1
+    sources = sorted({e.source_ip for e in events if e.source_ip})
+    destinations = sorted({e.destination_ip for e in events if e.destination_ip})
+    return {"events": events, "alerts": alerts, "behavior_alerts": behavior_alerts, "incidents": incidents,
+            "risk_score": risk, "severity_counts": by_severity, "rule_counts": by_rule,
+            "unique_sources": sources, "unique_destinations": destinations,
+            "parse_coverage": round((sum(bool(e.message) for e in events) / len(events) * 100), 1) if events else 0.0}
+
 
 def correlate(alerts: Iterable[Alert], window_seconds: int = 300) -> list[dict[str, object]]:
     grouped: list[dict[str, object]] = []
