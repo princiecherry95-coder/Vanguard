@@ -36,6 +36,9 @@ jobs:
       - name: Evidence validation regression tests
         run: python test_validation.py
 
+      - name: Unified SOC pipeline regression tests
+        run: python test_pipeline.py
+
       - name: Offline audit regression tests
         run: python test_audit.py
 
@@ -50,7 +53,7 @@ jobs:
         run: python -c "import engine, ingestion, audit, distributed, firewall, remediation, threat_intel, windows_events, local_ai; print('Vanguard-SIEM module import smoke test: PASS')"
 
       - name: Syntax validation
-        run: python -m py_compile app.py engine.py ingestion.py audit.py test_engine.py test_ingestion.py test_audit.py test_security.py
+        run: python -m py_compile app.py engine.py ingestion.py audit.py soc_pipeline.py test_engine.py test_ingestion.py test_audit.py test_security.py test_validation.py test_pipeline.py
 
       - name: Streamlit runtime smoke test
         shell: pwsh
