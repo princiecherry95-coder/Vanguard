@@ -55,6 +55,7 @@ def init_state() -> None:
         "analysis_result": None,
         "analysis_state": "IDLE",
         "analysis_completed_at": None,
+        "analysis_evidence_sha256": None,
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
     }
@@ -134,6 +135,8 @@ if st.session_state.analysis_summary:
     a4.metric("Incidents", len(st.session_state.analysis_result["incidents"]) if st.session_state.analysis_result else 0)
     a5.metric("Risk Score", summary["risk_score"])
     st.caption(f"Parse coverage {summary['parse_coverage']:.1f}% • {summary['unique_sources']} unique source(s) • {summary['unique_destinations']} unique destination(s) • Completed {st.session_state.analysis_completed_at or 'now'}")
+    if st.session_state.analysis_evidence_sha256:
+        st.code(f"Evidence SHA-256: {st.session_state.analysis_evidence_sha256}", language="text")
     if summary["rule_counts"]:
         st.dataframe(pd.DataFrame([{"Detection Rule": k, "Matches": v} for k, v in sorted(summary["rule_counts"].items(), key=lambda x: (-x[1], x[0]))]), use_container_width=True, hide_index=True)
     else:
@@ -257,6 +260,7 @@ with st.expander("Upload security logs", expanded=True):
                 "rule_counts": analysis["rule_counts"], "severity_counts": analysis["severity_counts"]}
             st.session_state.analysis_state = "COMPLETE"
             st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
+            st.session_state.analysis_evidence_sha256 = digest
             audit_event("EVIDENCE_ANALYSIS", source_name, digest)
             st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from local evidence. SHA-256: {digest[:16]}…"
             st.rerun()
