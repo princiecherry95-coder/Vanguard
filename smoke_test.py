@@ -15,7 +15,7 @@ REQUIRED = (
     'st.toggle("⚡ Demo Mode"',
     '"Total Log Entries"',
     '"Critical Anomalies"',
-    '"Warnings Flagged"',
+    '"High / Warning Alerts"',
     '"Quarantined Hosts"',
     "Live Security Log Stream",
     "Tactical AI Inspector & Playbook",
