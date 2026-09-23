@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from engine import correlate, detect, detect_behavior, parse_line
-from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, lines_from_upload, safe_uploaded_text
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, infer_upload_format, lines_from_upload, safe_uploaded_text
 from audit import audit_event
 from distributed import EventBuffer
 from firewall import block_ip
@@ -184,13 +184,14 @@ with st.expander("Upload security logs", expanded=True):
             text, digest = safe_uploaded_text(uploaded.getvalue(), uploaded.name)
             actual_fmt = fmt
             if actual_fmt == "AUTO":
-                ext = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else "txt"
-                actual_fmt = {"csv":"CSV", "json":"JSON", "jsonl":"JSONL", "xml":"XML"}.get(ext, "TEXT / SYSLOG")
+                actual_fmt = infer_upload_format(text, uploaded.name)
+            if actual_fmt == "JSONL":
+                st.info("Detected JSON Lines (one JSON object per line); processing as JSONL.")
             lines = lines_from_upload(text, "TEXT" if actual_fmt in {"TEXT / SYSLOG", "XML"} else actual_fmt)
             if not lines:
                 raise ValueError("No non-empty records were found.")
             if len(lines) > MAX_RECORDS:
-                raise ValueError("Record limit exceeded: maximum 50,000 records per upload.")
+                raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
             events = [parse_line(line, source_name) for line in lines]
             alerts = []
             for event in events:
