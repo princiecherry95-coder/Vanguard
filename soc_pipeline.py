@@ -9,27 +9,33 @@ from engine import analyze_events, parse_line
 from ingestion import MAX_RECORDS, infer_upload_format, lines_from_upload, safe_uploaded_text
 
 
+def _normalize_format(format_hint: str, text: str, filename: str) -> str:
+    """Return one canonical parser format for UI labels and analysis."""
+    requested = (format_hint or "AUTO").upper()
+    if requested == "AUTO":
+        requested = infer_upload_format(text, filename)
+    if requested == "TEXT / SYSLOG":
+        return "TEXT"
+    return requested
+
+
 def validate_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict[str, Any]:
-    """Fast preflight validation; full parsing is reserved for analysis."""
+    """Fast evidence gate. It never performs full event parsing."""
     text, digest = safe_uploaded_text(data, filename)
-    actual_fmt = format_hint if format_hint != "AUTO" else infer_upload_format(text, filename)
-    parse_fmt = actual_fmt
-    lines = lines_from_upload(text, parse_fmt)
+    actual_fmt = _normalize_format(format_hint, text, filename)
+    lines = lines_from_upload(text, actual_fmt)
     if not lines:
         raise ValueError("No non-empty records were found.")
     if len(lines) > MAX_RECORDS:
         raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per evidence set.")
-    sample = lines[:3] + (lines[-3:] if len(lines) > 6 else [])
-    for line in sample:
-        if not isinstance(line, str) or not line.strip():
-            raise ValueError("Evidence contains an empty or invalid record.")
-        parse_line(line, actual_fmt)
+    sample_count = min(6, len(lines))
     return {
         "filename": filename,
         "format": actual_fmt,
         "records": len(lines),
-        "parsed": len(sample),
-        "parse_coverage": 100.0 if sample else 0.0,
+        "parsed": 0,
+        "parse_coverage": 0.0,
+        "sample_records": sample_count,
         "sha256": digest,
         "source_formats": [actual_fmt],
         "validation_mode": "FAST_PREFLIGHT",
@@ -38,7 +44,7 @@ def validate_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dic
 def analyze_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict[str, Any]:
     """Single canonical path for upload/paste/collector evidence."""
     text, digest = safe_uploaded_text(data, filename)
-    actual_fmt = format_hint if format_hint != "AUTO" else infer_upload_format(text, filename)
+    actual_fmt = _normalize_format(format_hint, text, filename)
     parse_fmt = actual_fmt
     lines = lines_from_upload(text, parse_fmt)
     if not lines:
