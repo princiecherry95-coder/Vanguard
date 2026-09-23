@@ -16,7 +16,7 @@ from remediation import propose, execute_approved
 from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
-from soc_pipeline import analyze_bytes, commit_dashboard_state, stage_status, validate_bytes
+from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status, validate_bytes
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -304,7 +304,7 @@ with st.expander("Upload security logs", expanded=True):
 
     validation = st.session_state.validation_summary
     if validation:
-        st.success(f"✓ VALIDATED • {validation['records']:,} records • {validation['parse_coverage']:.1f}% parse coverage • SHA-256 {validation['sha256'][:16]}…")
+        st.success(f"✓ VALIDATED • {validation['records']:,} records • fast preflight PASS • SHA-256 {validation['sha256'][:16]}…")
         st.caption(f"Format: {validation['format']} • Parser: {', '.join(validation['source_formats']) or 'local-text'} • Evidence integrity: PASS")
     else:
         st.info("Validation required. The file will not enter the SOC analysis engine until validation passes.")
@@ -318,7 +318,28 @@ with st.expander("Upload security logs", expanded=True):
                 raw_bytes = uploaded.getvalue()
                 if current_upload_digest != validation["sha256"]:
                     raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
-                bundle = analyze_bytes(raw_bytes, uploaded.name, validation["format"])
+                progress = st.progress(0, text="Starting evidence analysis…")
+                preview = st.empty()
+                preview_rows = []
+
+                def publish_chunk(events, processed, total):
+                    for event in events:
+                        matches = detect(event)
+                        primary = max(matches, key=lambda item: {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}.get(item.severity, 0), default=None)
+                        preview_rows.append({
+                            "event_id": f"EVT-{event.raw_sha256[:10].upper()}",
+                            "timestamp": event.timestamp.isoformat(),
+                            "severity": primary.severity if primary else event.severity,
+                            "source_ip": event.source_ip or "N/A",
+                            "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
+                            "attack_type": primary.title if primary else (event.action or event.event_type),
+                        })
+                    pct = processed / total if total else 1.0
+                    progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
+                    preview.dataframe(pd.DataFrame(preview_rows[-200:]), use_container_width=True, hide_index=True)
+
+                bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, validation["format"], on_chunk=publish_chunk)
+                progress.progress(1.0, text=f"Analysis complete • {bundle['records']:,} records")
                 if bundle["sha256"] != validation["sha256"]:
                     raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
                 commit_dashboard_state(st, bundle, source_name or uploaded.name)
