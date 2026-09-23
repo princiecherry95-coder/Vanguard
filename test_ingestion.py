@@ -19,6 +19,17 @@ def main():
     assert len(lines_from_upload('{"events":[{"src_ip":"10.0.0.1","message":"Failed password"},{"src_ip":"10.0.0.2","message":"ok"}]}', "JSON")) == 2
     assert len(lines_from_upload('{"data":[{"message":"one"},{"message":"two"}]}', "JSON")) == 2
     assert len(lines_from_upload('source,message\n10.0.0.1,Failed login\n', "CSV")) == 1
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Event><TimeCreated>2026-09-23T10:00:00+00:00</TimeCreated><SourceIp>10.0.0.7</SourceIp><Message>Failed password for user=admin</Message></Event>"""
+    assert len(lines_from_upload(xml, "XML")) == 1
+    assert infer_upload_format(xml, "events.txt") == "TEXT"
+    assert infer_upload_format("<Event><Message>x</Message></Event>", "events.xml") == "XML"
+
+    # Evidence must not be silently truncated below the 1 GiB safety boundary.
+    long_record = ("A" * 12000).encode("utf-8")
+    long_text, long_digest = safe_uploaded_text(long_record, "large.log")
+    assert len(long_text) == 12000
+    assert long_digest and len(long_digest) == 64
 
     assert infer_upload_format('{"message":"one"}\n{"message":"two"}', "events.json") == "JSONL"
     assert infer_upload_format('[{"message":"one"}, {"message":"two"}]', "events.json") == "JSON"
