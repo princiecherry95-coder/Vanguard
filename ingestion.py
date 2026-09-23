@@ -9,8 +9,8 @@ import hashlib
 import io
 import json
 
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-MAX_RECORDS = 50_000
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
+MAX_RECORDS = 1_000_000
 ALLOWED_UPLOAD_TYPES = {"txt", "log", "csv", "json", "jsonl", "xml"}
 
 
@@ -18,7 +18,7 @@ def safe_uploaded_text(data: bytes, filename: str) -> tuple[str, str]:
     if not isinstance(data, (bytes, bytearray)):
         raise ValueError("Upload content must be bytes.")
     if len(data) > MAX_UPLOAD_BYTES:
-        raise ValueError("File exceeds the 10 MB safety limit.")
+        raise ValueError("File exceeds the 1 GiB safety limit.")
     name = filename or "uploaded.log"
     suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
     if suffix not in ALLOWED_UPLOAD_TYPES:
