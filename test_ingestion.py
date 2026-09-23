@@ -3,7 +3,7 @@ from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, lines
 
 
 def main():
-    assert MAX_UPLOAD_BYTES == 10 * 1024 * 1024
+    assert MAX_UPLOAD_BYTES == 1024 * 1024 * 1024
     assert MAX_RECORDS == 50_000
     assert {"txt", "log", "csv", "json", "jsonl", "xml"} == ALLOWED_UPLOAD_TYPES
 
