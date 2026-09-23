@@ -51,6 +51,7 @@ def init_state() -> None:
         "quarantined_ips": set(),
         "selected_event": None,
         "telemetry_source": "No local evidence loaded",
+        "analysis_summary": None,
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
     }
