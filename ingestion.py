@@ -1,4 +1,4 @@
-"""Secure local log-ingestion helpers for Vanguard-SIEM.
+""""Secure local log-ingestion helpers for Vanguard-SIEM.
 
 No uploaded content is executed and no network access is performed.
 """
@@ -29,12 +29,16 @@ def safe_uploaded_text(data: bytes, filename: str) -> tuple[str, str]:
     suffix = name.rsplit(".", 1)[-1].lower() if "." in name else "txt"
     if suffix not in ALLOWED_UPLOAD_TYPES:
         raise ValueError(f"Unsupported log format: .{suffix}")
-    # Reject actual NUL bytes. The previous check only matched the four-byte
-    # text sequence "\\x00", which did not detect binary NUL data.
+    # Reject actual NUL bytes. Never execute uploaded content.
     if b"\x00" in data:
-        raise ValueError("Binary content detected. Upload a text log export, CSV, JSON, JSONL or XML file.")
+        raise ValueError(
+            "Binary content detected. Upload a text log export, CSV, JSON, JSONL or XML file."
+        )
     digest = hashlib.sha256(data).hexdigest()
-    # Decode the complete bounded upload. Record-count enforcement happens after\n    # format-aware record splitting, so valid evidence is never silently truncated.\n    return bytes(data).decode("utf-8-sig", errors="replace"), digest
+    # Decode the complete bounded upload. Record-count enforcement happens
+    # after format-aware record splitting, so evidence is never silently truncated.
+    text = bytes(data).decode("utf-8-sig", errors="replace")
+    return text, digest
 
 
 def infer_upload_format(text: str, filename: str = "") -> str:
@@ -65,7 +69,6 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
         return [line for line in text.splitlines() if line.strip()]
     if fmt == "JSON":
         parsed = json.loads(text)
-        # Accept common export envelopes while preserving individual events.
         if isinstance(parsed, list):
             source = parsed
         elif isinstance(parsed, dict):
@@ -83,8 +86,6 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
     if fmt == "CSV":
         return [json.dumps(row, ensure_ascii=False) for row in csv.DictReader(io.StringIO(text))]
     if fmt == "XML":
-        # Preserve a complete XML document as one evidence record. If the
-        # source is a line-oriented XML export, fall back to non-empty lines.
         try:
             import xml.etree.ElementTree as ET
             ET.fromstring(text)
@@ -92,3 +93,4 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
         except ET.ParseError:
             return [line for line in text.splitlines() if line.strip()]
     return [line for line in text.splitlines() if line.strip()]
+"
