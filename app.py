@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from engine import correlate, detect, detect_behavior, parse_line
+from engine import analyze_events, correlate, detect, detect_behavior, parse_line
 from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, infer_upload_format, lines_from_upload, safe_uploaded_text
 from audit import audit_event
 from distributed import EventBuffer
@@ -52,6 +52,7 @@ def init_state() -> None:
         "selected_event": None,
         "telemetry_source": "No local evidence loaded",
         "analysis_summary": None,
+        "analysis_result": None,
         "incident_exports": 0,
         "last_action": "System initialized in air-gapped mode.",
     }
@@ -201,11 +202,9 @@ with st.expander("Upload security logs", expanded=True):
             if len(lines) > MAX_RECORDS:
                 raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
             events = [parse_line(line, actual_fmt) for line in lines]
-            alerts = []
-            for event in events:
-                alerts.extend(detect(event))
-            alerts.extend(detect_behavior(events))
-            incidents = correlate(alerts)
+            analysis = analyze_events(events)
+            alerts = analysis["alerts"]
+            incidents = analysis["incidents"]
             # Replace dashboard training data with the actual analyzed evidence.
             alerts_by_event = {}
             for alert in alerts:
@@ -230,14 +229,29 @@ with st.expander("Upload security logs", expanded=True):
             st.session_state.selected_event = live_logs[0]["event_id"] if live_logs else None
             st.session_state.telemetry_source = f"{uploaded.name} • {len(live_logs):,} records"
             st.session_state.demo_mode = False
+            st.session_state.analysis_result = analysis
+            st.session_state.analysis_summary = {
+                "risk_score": analysis["risk_score"], "parse_coverage": analysis["parse_coverage"],
+                "unique_sources": len(analysis["unique_sources"]), "unique_destinations": len(analysis["unique_destinations"]),
+                "rule_counts": analysis["rule_counts"], "severity_counts": analysis["severity_counts"]}
             audit_event("EVIDENCE_ANALYSIS", source_name, digest)
             st.session_state.last_action = f"Uploaded evidence {uploaded.name} analyzed locally. SHA-256: {digest[:16]}…"
             st.success(f"Analysis complete: {uploaded.name} • SHA-256 {digest}")
-            u1, u2, u3, u4 = st.columns(4)
+            u1, u2, u3, u4, u5 = st.columns(5)
             u1.metric("Records", len(lines))
             u2.metric("Parsed", len(events))
             u3.metric("Alerts", len(alerts))
             u4.metric("Incidents", len(incidents))
+            u5.metric("Risk Score", analysis["risk_score"])
+            s1, s2, s3 = st.columns(3)
+            s1.metric("Parse Coverage", f"{analysis['parse_coverage']:.1f}%")
+            s2.metric("Unique Sources", len(analysis["unique_sources"]))
+            s3.metric("Unique Destinations", len(analysis["unique_destinations"]))
+            st.markdown("#### Detection breakdown")
+            if analysis["rule_counts"]:
+                st.dataframe(pd.DataFrame([{"Rule": k, "Matches": v} for k, v in sorted(analysis["rule_counts"].items(), key=lambda x: (-x[1], x[0]))]), use_container_width=True, hide_index=True)
+            else:
+                st.info("No configured detection rules matched the uploaded telemetry.")
             if alerts:
                 for alert in alerts:
                     st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
