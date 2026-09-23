@@ -21,6 +21,25 @@ def main():
     assert len(rows) == 2
     assert rows[0]["raw_sha256"]
 
+    # The canonical analyzer must preserve structured formats and security detections.
+    jsonl = (
+        b'{"timestamp":"2026-09-23T10:01:00+00:00","src_ip":"10.10.1.7","event_type":"auth","message":"Failed password for user=admin"}\n'
+        b'{"timestamp":"2026-09-23T10:01:10+00:00","src_ip":"10.10.1.7","message":"GET /search?q=\' OR \'1\'=\'1"}\n'
+    )
+    structured = analyze_bytes(jsonl, "events.jsonl", "JSONL")
+    assert structured["records"] == 2
+    assert structured["analysis"]["rule_counts"].get("SQL_INJECTION") == 1
+    assert all(event.raw_sha256 for event in structured["events"])
+    structured_rows = analysis_to_logs(structured)
+    assert structured_rows[0]["source_ip"] == "10.10.1.7"
+    assert structured_rows[1]["attack_type"] == "Web application injection indicator"
+
+    csv_data = b"timestamp,source_ip,message\\n2026-09-23T10:02:00+00:00,10.10.1.8,Failed password for user=admin\\n"
+    csv_bundle = analyze_bytes(csv_data, "events.csv", "CSV")
+    assert csv_bundle["records"] == 1
+    assert csv_bundle["events"][0].source_ip == "10.10.1.8"
+    assert csv_bundle["analysis"]["rule_counts"].get("AUTH_FAILURE") == 1
+
     stages = stage_status()
     assert list(stages) == ["INGEST", "VALIDATE", "ANALYZE", "CORRELATE", "RISK", "INVESTIGATE", "RESPOND", "AUDIT"]
     assert stages["RESPOND"] == "APPROVAL_REQUIRED"
