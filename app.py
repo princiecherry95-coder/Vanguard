@@ -192,7 +192,7 @@ with st.expander("Upload security logs", expanded=True):
                 raise ValueError("No non-empty records were found.")
             if len(lines) > MAX_RECORDS:
                 raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per upload.")
-            events = [parse_line(line, source_name) for line in lines]
+            events = [parse_line(line, actual_fmt) for line in lines]
             alerts = []
             for event in events:
                 alerts.extend(detect(event))
