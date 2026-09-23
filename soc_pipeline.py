@@ -67,7 +67,7 @@ def analyze_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict
 def analyze_bytes_incremental(data: bytes, filename: str, format_hint: str = "AUTO", on_chunk=None, chunk_size: int = 5000):
     """Parse evidence in bounded chunks and publish optional progress previews."""
     text, digest = safe_uploaded_text(data, filename)
-    actual_fmt = format_hint if format_hint != "AUTO" else infer_upload_format(text, filename)
+    actual_fmt = _normalize_format(format_hint, text, filename)
     lines = lines_from_upload(text, actual_fmt)
     if not lines:
         raise ValueError("No non-empty records were found.")
