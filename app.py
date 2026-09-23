@@ -16,7 +16,7 @@ from remediation import propose, execute_approved
 from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
-from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status, validate_bytes
+from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -261,75 +261,39 @@ with right:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-st.markdown('<div class="panel"><div class="pt">Log Ingestion Center</div>', unsafe_allow_html=True)
-st.caption(f"Local evidence intake • up to {MAX_UPLOAD_BYTES / (1024**3):.0f} GiB per file • sanitized, hashed and analyzed offline. Uploaded content is never executed.")
-with st.expander("Upload security logs", expanded=True):
-    uploaded = st.file_uploader("Choose a local log file", type=sorted(ALLOWED_UPLOAD_TYPES), accept_multiple_files=False, max_upload_size=1024, help="Local files up to 1 GiB. Use .log/.txt/.jsonl for very large event streams.")
+st.markdown('<div class="panel"><div class="pt">Log Analysis Center</div>', unsafe_allow_html=True)
+st.caption(f"Local evidence analysis • up to {MAX_UPLOAD_BYTES / (1024**3):.0f} GiB per file • sanitized, hashed and analyzed offline. No separate validation/staging step is required.")
+
+with st.expander("Analyze security logs", expanded=True):
+    uploaded = st.file_uploader(
+        "Choose a local log file",
+        type=sorted(ALLOWED_UPLOAD_TYPES),
+        accept_multiple_files=False,
+        max_upload_size=1024,
+        help="Local files up to 1 GiB. Uploaded content is never executed.",
+    )
     fmt = st.selectbox("Format", ["AUTO", "TEXT / SYSLOG", "CSV", "JSON", "JSONL", "XML"])
     source_name = st.text_input("Source", value="Local evidence")
-    if uploaded is not None:
-        size_mb = uploaded.size / (1024 * 1024) if getattr(uploaded, "size", None) else len(uploaded.getvalue()) / (1024 * 1024)
-        st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • limit 1,024 MB")
-    current_upload_key = None
-    current_upload_digest = None
-    if uploaded is not None:
-        current_upload_bytes = uploaded.getvalue()
-        current_upload_digest = __import__("hashlib").sha256(current_upload_bytes).hexdigest()
-        current_upload_key = f"{uploaded.name}:{len(current_upload_bytes)}:{current_upload_digest}"
-    if uploaded is not None and st.session_state.validation_key != current_upload_key:
-        st.session_state.validation_summary = None
-        st.session_state.validation_key = None
-        st.session_state.analysis_state = "IDLE"
 
-    st.markdown("**Evidence workflow**")
-    st.caption("UPLOAD → VALIDATE → ANALYZE → COMPLETE. Analysis is locked until validation passes.")
-
-    vcol, acol = st.columns(2)
-    with vcol:
-        if st.button("1. Validate Evidence", use_container_width=True, disabled=uploaded is None):
-            try:
-                raw_bytes = uploaded.getvalue()
-                validation = validate_bytes(raw_bytes, uploaded.name, fmt)
-                st.session_state.validation_summary = validation
-                st.session_state.validation_key = current_upload_key
-                st.session_state.analysis_state = "VALIDATED"
-                st.session_state.pipeline_stage = "VALIDATE"
-                st.session_state.last_action = f"Evidence validation passed for {uploaded.name}. Analysis is now unlocked."
-            except Exception as exc:
-                st.session_state.validation_summary = None
-                st.session_state.validation_key = None
-                st.session_state.analysis_state = "VALIDATION FAILED"
-                st.session_state.pipeline_stage = "FAILED"
-                detail = f"{type(exc).__name__}: {exc}"
-                st.session_state.last_action = f"Validation failed safely for {uploaded.name}: {detail}"
-                st.error(f"Evidence validation failed safely: {detail}")
-
-    validation = st.session_state.validation_summary
-    if validation:
-        st.success(f"✓ VALIDATED • {validation['records']:,} records • fast preflight PASS • SHA-256 {validation['sha256'][:16]}…")
-        st.caption(f"Format: {validation['format']} • Parser: {', '.join(validation['source_formats']) or 'local-text'} • Evidence integrity: PASS")
+    if uploaded is None:
+        st.info("Select a local evidence file, then click Analyze. No separate validation step is required.")
     else:
-        st.info("Validation required. The file will not enter the SOC analysis engine until validation passes.")
+        raw_bytes = uploaded.getvalue()
+        current_digest = __import__("hashlib").sha256(raw_bytes).hexdigest()
+        size_mb = len(raw_bytes) / (1024 * 1024)
+        st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • SHA-256 {current_digest[:16]}…")
 
-    with acol:
-        analyze_disabled = uploaded is None or not validation or st.session_state.validation_key != current_upload_key
-        if st.button("2. Analyze Validated Evidence", type="primary", use_container_width=True, disabled=analyze_disabled):
+        if st.button("Analyze Evidence", type="primary", use_container_width=True):
             try:
                 st.session_state.analysis_state = "ANALYZING"
                 st.session_state.pipeline_stage = "ANALYZE"
-                raw_bytes = uploaded.getvalue()
-                if current_upload_digest != validation["sha256"]:
-                    raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
                 progress = st.progress(0, text="Starting evidence analysis…")
+                live_dashboard.empty()
                 preview = st.empty()
                 preview_rows = []
 
                 def publish_chunk(events, processed, total):
                     for event in events:
-                        # Preview must never call the full detection engine. The detection
-                        # engine runs once on the complete evidence set after all chunks are
-                        # parsed. This keeps the live feed fast and prevents one preview-only
-                        # exception from aborting the entire upload.
                         preview_rows.append({
                             "event_id": f"EVT-{event.raw_sha256[:10].upper()}",
                             "timestamp": event.timestamp.isoformat(),
@@ -341,26 +305,29 @@ with st.expander("Upload security logs", expanded=True):
                     pct = processed / total if total else 1.0
                     progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
                     live = pd.DataFrame(preview_rows)
-                    live_critical = int((live["severity"] == "CRITICAL").sum()) if not live.empty else 0
-                    live_high = int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0
                     with live_dashboard.container():
                         lm1, lm2, lm3, lm4 = st.columns(4)
                         lm1.metric("Analyzed Records", processed)
-                        lm2.metric("Critical Anomalies", live_critical)
-                        lm3.metric("High / Warning", live_high)
+                        lm2.metric("Critical Anomalies", int((live["severity"] == "CRITICAL").sum()) if not live.empty else 0)
+                        lm3.metric("High / Warning", int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0)
                         lm4.metric("Latest Event", preview_rows[-1]["event_id"] if preview_rows else "-")
-                        st.caption("LIVE ANALYSIS FEED • records are being normalized and classified as the file is processed")
+                        st.caption("LIVE ANALYSIS FEED • records are being normalized while the evidence is analyzed")
                         st.dataframe(live.tail(100), use_container_width=True, hide_index=True)
                     preview.dataframe(live.tail(200), use_container_width=True, hide_index=True)
 
-                bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, validation["format"], on_chunk=publish_chunk)
+                bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, fmt, on_chunk=publish_chunk)
+                if bundle["sha256"] != current_digest:
+                    raise ValueError("Evidence changed during analysis. Please analyze the current file again.")
                 progress.progress(1.0, text=f"Analysis complete • {bundle['records']:,} records")
-                if bundle["sha256"] != validation["sha256"]:
-                    raise ValueError("Evidence changed after validation. Validate the current file again before analysis.")
                 commit_dashboard_state(st, bundle, source_name or uploaded.name)
-                st.session_state.pipeline_history.append({"source": uploaded.name, "sha256": bundle["sha256"], "records": bundle["records"], "completed_at": bundle["completed_at"]})
+                st.session_state.pipeline_history.append({
+                    "source": uploaded.name,
+                    "sha256": bundle["sha256"],
+                    "records": bundle["records"],
+                    "completed_at": bundle["completed_at"],
+                })
                 st.session_state.analysis_state = "COMPLETE"
-                st.session_state.last_action = f"Analysis complete for validated evidence {uploaded.name}. Dashboard updated from the uploaded evidence."
+                st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence."
                 st.rerun()
             except Exception as exc:
                 st.session_state.analysis_state = "FAILED"
@@ -368,10 +335,10 @@ with st.expander("Upload security logs", expanded=True):
                 st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
                 detail = f"{type(exc).__name__}: {exc}"
                 st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {detail}"
-                st.error(f"Analysis rejected safely: {detail}")
-
+                st.error(f"Analysis failed safely: {detail}")
 
 st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 st.markdown('<div class="panel"><div class="pt">Local SOC Analytics Engine</div>', unsafe_allow_html=True)
