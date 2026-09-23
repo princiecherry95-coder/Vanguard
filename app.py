@@ -232,13 +232,12 @@ with st.expander("Upload security logs", expanded=True):
             st.session_state.demo_mode = False
             audit_event("EVIDENCE_ANALYSIS", source_name, digest)
             st.session_state.last_action = f"Uploaded evidence {uploaded.name} analyzed locally. SHA-256: {digest[:16]}…"
-            st.rerun()
+            st.success(f"Analysis complete: {uploaded.name} • SHA-256 {digest}")
             u1, u2, u3, u4 = st.columns(4)
             u1.metric("Records", len(lines))
             u2.metric("Parsed", len(events))
             u3.metric("Alerts", len(alerts))
             u4.metric("Incidents", len(incidents))
-            st.success(f"Analysis complete: {uploaded.name} • SHA-256 {digest}")
             if alerts:
                 for alert in alerts:
                     st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
