@@ -165,7 +165,7 @@ def analysis_to_logs(bundle: dict[str, Any]) -> list[dict[str, Any]]:
         primary = max(matches, key=lambda a: rank.get(a.severity, 0), default=None)
         rows.append({
             "timestamp": event.timestamp.isoformat(),
-            "event_id": f"EVT-{event.raw_sha256[:10].upper()}" if event.raw_sha256 else f"EVT-LOCAL-{index:06d}",
+            "event_id": f"EVT-{event.raw_sha256[:10].upper()}-{index:06d}" if event.raw_sha256 else f"EVT-LOCAL-{index:06d}",
             "source_ip": event.source_ip or "N/A",
             "severity": primary.severity if primary else (event.severity or "LOW"),
             "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
