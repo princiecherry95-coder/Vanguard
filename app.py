@@ -27,6 +27,9 @@ from security_operations import SecurityOperationsStore, telemetry_status
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
+# Placeholder must exist before the Evidence Intake callback can publish live analysis updates.
+live_dashboard = st.empty()
+
 
 def _format_audit_timestamp(value):
     if not value:
