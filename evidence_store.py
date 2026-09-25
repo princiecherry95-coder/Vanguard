@@ -56,7 +56,7 @@ class EvidenceStore:
         return conn
 
     def save_analysis(self, bundle: dict, analyst_alerts: Iterable[dict]) -> None:
-            with self._connect() as conn:
+        with self._connect() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO evidence_sets(sha256,filename,format,record_count,completed_at) VALUES(?,?,?,?,?)",
                 (bundle["sha256"], bundle["filename"], bundle["format"], bundle["records"], bundle["completed_at"]),
