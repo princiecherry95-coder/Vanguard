@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     evidence_sha256 TEXT NOT NULL,
     finding_id TEXT NOT NULL,
+    UNIQUE(evidence_sha256, finding_id),
     rule_id TEXT NOT NULL,
     rule_version TEXT NOT NULL,
     severity TEXT NOT NULL,
@@ -64,7 +65,7 @@ class EvidenceStore:
             )
             for finding in analyst_alerts:
                 conn.execute(
-                    """INSERT INTO findings
+                    """INSERT OR IGNORE INTO findings
                     (evidence_sha256,finding_id,rule_id,rule_version,severity,confidence,
                      first_seen,last_seen,occurrence_count,source_count,destination_count,mitre_technique,reason)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
