@@ -167,6 +167,64 @@ def detection_coverage(rows: Iterable[dict], analysis_result: dict | None = None
     return {"records": total, "observed_category_rates": rates, "analyzed_alerts": alerts}
 
 
+
+def asset_context(rows: Iterable[dict]) -> list[dict[str, object]]:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        asset = _text(row, "hostname", "host", "asset_id", "source_ip", "source") or "UNATTRIBUTED"
+        groups[asset].append(row)
+    result = []
+    for asset, items in groups.items():
+        times = sorted(ts for row in items if (ts := _timestamp(row)) is not None)
+        users = sorted({_text(row, "user", "username", "account") for row in items if _text(row, "user", "username", "account")})
+        targets = sorted({_text(row, "destination_ip", "destination", "target_endpoint") for row in items if _text(row, "destination_ip", "destination", "target_endpoint")})
+        severities = [SEVERITY_ORDER.get(_text(row, "severity").upper(), 1) for row in items]
+        max_value = max(severities) if severities else 1
+        max_severity = next((name for name, value in SEVERITY_ORDER.items() if value == max_value), "LOW")
+        result.append({
+            "asset": asset,
+            "events": len(items),
+            "max_severity": max_severity,
+            "users": len(users),
+            "targets": len(targets),
+            "first_seen": times[0].isoformat() if times else "UNAVAILABLE",
+            "last_seen": times[-1].isoformat() if times else "UNAVAILABLE",
+        })
+    return sorted(result, key=lambda item: (-int(item["events"]), str(item["asset"])))
+
+
+def identity_activity(rows: Iterable[dict]) -> list[dict[str, object]]:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        identity = _text(row, "user", "username", "account")
+        if identity:
+            groups[identity].append(row)
+    result = []
+    for identity, items in groups.items():
+        result.append({
+            "identity": identity,
+            "events": len(items),
+            "unique_sources": len({_text(r, "source_ip", "source", "hostname", "host") for r in items if _text(r, "source_ip", "source", "hostname", "host")}),
+            "unique_targets": len({_text(r, "destination_ip", "destination", "target_endpoint") for r in items if _text(r, "destination_ip", "destination", "target_endpoint")}),
+            "max_severity": max((_text(r, "severity").upper() for r in items), key=lambda value: SEVERITY_ORDER.get(value, 1), default="LOW"),
+        })
+    return sorted(result, key=lambda item: (-int(item["events"]), str(item["identity"])))
+
+
+def incident_context(analysis_result: dict | None) -> list[dict[str, object]]:
+    incidents = (analysis_result or {}).get("incidents", [])
+    result = []
+    for incident in incidents:
+        result.append({
+            "incident_id": incident.get("incident_id", "UNIDENTIFIED"),
+            "severity": incident.get("severity", "UNSPECIFIED"),
+            "first_seen": str(incident.get("first_seen", "UNAVAILABLE")),
+            "last_seen": str(incident.get("last_seen", "UNAVAILABLE")),
+            "alerts": len(incident.get("alerts", [])),
+            "sources": len(incident.get("sources", [])),
+        })
+    return result
+
 def build_soc_context(rows: Iterable[dict], analysis_result: dict | None = None) -> dict[str, object]:
     rows = list(rows)
     return {
@@ -174,6 +232,9 @@ def build_soc_context(rows: Iterable[dict], analysis_result: dict | None = None)
         "quality": evidence_quality(rows),
         "duplicates": duplicate_analysis(rows),
         "sources": source_inventory(rows),
+        "assets": asset_context(rows),
+        "identities": identity_activity(rows),
+        "incidents": incident_context(analysis_result),
         "timeline": observed_timeline(rows),
         "baseline": activity_baseline(rows),
         "coverage": detection_coverage(rows, analysis_result),
