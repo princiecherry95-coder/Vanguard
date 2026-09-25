@@ -28,6 +28,9 @@ def report_context(rows: list[dict[str, Any]], analysis: dict[str, Any] | None, 
         "incidents": len((analysis or {}).get("incidents", [])),
         "parse_coverage": (analysis or {}).get("parse_coverage", 0),
         "evidence_sha256": (analysis or {}).get("evidence_sha256", ""),
+        "first_seen": s.get("first_seen"),
+        "last_seen": s.get("last_seen"),
+        "data_state": "SIMULATED / DEMO" if source.lower().find("demo") >= 0 else "OBSERVED LOCAL EVIDENCE",
     }
 
 
@@ -48,7 +51,7 @@ def make_pdf(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report")
     styles = getSampleStyleSheet()
     story = [
         Paragraph(title, styles["Title"]),
-        Paragraph(f"Source: {source}<br/>Generated: {ctx['generated_at']}<br/>Evidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}", styles["Normal"]),
+        Paragraph(f"Data state: {ctx['data_state']}<br/>Source: {source}<br/>Observed window: {ctx.get('first_seen') or 'not available'} → {ctx.get('last_seen') or 'not available'}<br/>Generated: {ctx['generated_at']}<br/>Evidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}", styles["Normal"]),
         Spacer(1, 8),
     ]
     metrics = [
@@ -61,6 +64,11 @@ def make_pdf(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report")
     story.append(Table(metrics, repeatRows=1))
     story += [Spacer(1, 10), Paragraph("Severity distribution", styles["Heading2"])]
     story.append(Table([["Severity", "Count"]] + [[k, v] for k, v in s["severity_counts"].items()], repeatRows=1))
+    sev_fig = plt.figure(figsize=(6.8, 2.4)); sev_ax = sev_fig.add_subplot(111)
+    sev_ax.bar(list(s["severity_counts"].keys()), list(s["severity_counts"].values()))
+    sev_ax.set_title("Observed severity distribution"); sev_ax.set_ylabel("Events"); sev_ax.grid(axis="y", alpha=0.2)
+    sev_img = BytesIO(); sev_fig.savefig(sev_img, format="png", dpi=140, bbox_inches="tight"); plt.close(sev_fig); sev_img.seek(0)
+    story += [Spacer(1, 6), Image(sev_img, width=175 * mm, height=58 * mm)]
     story += [Spacer(1, 10), Paragraph("Top attack types", styles["Heading2"])]
     story.append(Table([["Attack type", "Count"]] + [[str(k), v] for k, v in s["top_attack_types"].items()], repeatRows=1))
 
@@ -151,7 +159,7 @@ def make_xlsx(rows, analysis, source) -> bytes:
     ws = wb.active; ws.title = "Executive Summary"
     metrics = [
         ("System", ctx["system"]), ("Classification", ctx["classification"]), ("Source", source),
-        ("Generated", ctx["generated_at"]), ("Evidence SHA-256", ctx.get("evidence_sha256", "")),
+        ("Generated", ctx["generated_at"]), ("Observed window", f"{ctx.get('first_seen') or 'N/A'} → {ctx.get('last_seen') or 'N/A'}"), ("Data state", ctx["data_state"]), ("Evidence SHA-256", ctx.get("evidence_sha256", "")),
         ("Records", s["records"]), ("Unique sources", s["unique_sources"]), ("Unique targets", s["unique_targets"]),
         ("Alert rate %", s["alert_rate_pct"]), ("Critical rate %", s["critical_rate_pct"]),
         ("Parse coverage %", ctx["parse_coverage"]), ("Risk score", ctx["risk_score"]),
@@ -211,7 +219,7 @@ def make_pptx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report"
     ctx = report_context(rows, analysis, source); s = ctx["analytics"]
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[0]); slide.shapes.title.text = title
-    slide.placeholders[1].text = f"{source}\n{ctx['generated_at']}\nEvidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}"
+    slide.placeholders[1].text = f"{ctx['data_state']}\n{source}\nObserved: {ctx.get('first_seen') or 'N/A'} → {ctx.get('last_seen') or 'N/A'}\n{ctx['generated_at']}\nEvidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}"
     slide = prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text = "Executive analytics"
     tf = slide.shapes.add_textbox(Inches(1), Inches(1.2), Inches(11), Inches(5)).text_frame
     tf.text = "\n".join([
