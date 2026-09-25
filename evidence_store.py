@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     evidence_sha256 TEXT NOT NULL,
     finding_id TEXT NOT NULL,
-    UNIQUE(evidence_sha256, finding_id),
     rule_id TEXT NOT NULL,
     rule_version TEXT NOT NULL,
     severity TEXT NOT NULL,
@@ -38,7 +37,8 @@ CREATE TABLE IF NOT EXISTS findings (
     source_count INTEGER NOT NULL,
     destination_count INTEGER NOT NULL,
     mitre_technique TEXT,
-    reason TEXT NOT NULL
+    reason TEXT NOT NULL,
+    UNIQUE(evidence_sha256, finding_id)
 );
 CREATE INDEX IF NOT EXISTS idx_findings_evidence ON findings(evidence_sha256);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
