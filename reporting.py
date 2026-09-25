@@ -193,6 +193,17 @@ def make_docx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report"
     out = BytesIO(); d.save(out); return out.getvalue()
 
 
+def _excel_safe_value(value):
+    """Convert timezone-aware datetime-like values to Excel-safe values."""
+    if value is None:
+        return ""
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if hasattr(value, "tzinfo") and value.tzinfo is not None:
+        value = value.astimezone(__import__("datetime").timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def make_xlsx(rows, analysis, source) -> bytes:
     from openpyxl import Workbook
     from openpyxl.chart import BarChart, LineChart, Reference
@@ -296,7 +307,7 @@ def make_xlsx(rows, analysis, source) -> bytes:
     if not findings.empty:
         fws.append(list(findings.columns))
         for row in findings.itertuples(index=False):
-            fws.append(list(row))
+            fws.append([_excel_safe_value(value) for value in row])
     else:
         fws.append(["No analyst findings"])
     style_sheet(fws, landscape=True)
@@ -316,7 +327,7 @@ def make_xlsx(rows, analysis, source) -> bytes:
     if all_columns:
         ev.append(all_columns)
         for record in rows:
-            ev.append([record.get(column, "") for column in all_columns])
+            ev.append([_excel_safe_value(record.get(column, "")) for column in all_columns])
     else:
         ev.append(["No evidence records"])
     style_sheet(ev, landscape=True)
