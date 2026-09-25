@@ -40,7 +40,7 @@ CSS = """
 .stApp{background:#050a12;color:#e7edf5;font-family:"IBM Plex Sans","Segoe UI",Arial,sans-serif}
 .stApp *{font-family:"IBM Plex Sans","Segoe UI",Arial,sans-serif}
 code,pre,[data-testid="stCode"],.mono{font-family:"IBM Plex Mono","SFMono-Regular",Consolas,monospace!important}
-.block-container{max-width:1560px;padding:1.25rem 2rem 2.5rem}.block-container{max-width:1560px;padding:1.25rem 2rem 2.5rem}
+.block-container{max-width:1560px;padding:1.25rem 2rem 2.5rem}
 [data-testid="stAppViewContainer"]{background-image:linear-gradient(rgba(3,8,14,.78),rgba(3,8,14,.9)),url("data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201920%201080%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22bg%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20stop-color%3D%22%23020812%22%2F%3E%3Cstop%20offset%3D%22.5%22%20stop-color%3D%22%23071522%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2302070d%22%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D%22glow%22%3E%3Cstop%20stop-color%3D%22%2300e5ff%22%20stop-opacity%3D%22.35%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2300e5ff%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3Cpattern%20id%3D%22grid%22%20width%3D%2248%22%20height%3D%2248%22%20patternUnits%3D%22userSpaceOnUse%22%3E%3Cpath%20d%3D%22M48%200H0V48%22%20fill%3D%22none%22%20stroke%3D%22%232c6680%22%20stroke-opacity%3D%22.18%22%2F%3E%3C%2Fpattern%3E%3C%2Fdefs%3E%3Crect%20width%3D%221920%22%20height%3D%221080%22%20fill%3D%22url(%23bg)%22%2F%3E%3Crect%20width%3D%221920%22%20height%3D%221080%22%20fill%3D%22url(%23grid)%22%2F%3E%3Ccircle%20cx%3D%221500%22%20cy%3D%22250%22%20r%3D%22480%22%20fill%3D%22url(%23glow)%22%2F%3E%3Ccircle%20cx%3D%22420%22%20cy%3D%22800%22%20r%3D%22360%22%20fill%3D%22url(%23glow)%22%20opacity%3D%22.35%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2339d9ff%22%20stroke-opacity%3D%22.35%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22M100%20820%20C360%20570%20570%20690%20790%20430%20S1210%20180%201800%20420%22%2F%3E%3Cpath%20d%3D%22M160%20900%20C450%20680%20660%20760%20900%20560%20S1350%20390%201810%20620%22%2F%3E%3Cpath%20d%3D%22M320%20160%20L680%20340%20L1040%20170%20L1390%20350%20L1710%20180%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%235ee38a%22%3E%3Ccircle%20cx%3D%22680%22%20cy%3D%22340%22%20r%3D%227%22%2F%3E%3Ccircle%20cx%3D%221040%22%20cy%3D%22170%22%20r%3D%227%22%2F%3E%3Ccircle%20cx%3D%221390%22%20cy%3D%22350%22%20r%3D%227%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%23ff4d5f%22%3E%3Ccircle%20cx%3D%22790%22%20cy%3D%22430%22%20r%3D%229%22%2F%3E%3Ccircle%20cx%3D%221210%22%20cy%3D%22180%22%20r%3D%229%22%2F%3E%3Ccircle%20cx%3D%221600%22%20cy%3D%22500%22%20r%3D%229%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%2307131e%22%20stroke%3D%22%2339d9ff%22%20stroke-opacity%3D%22.28%22%3E%3Crect%20x%3D%221160%22%20y%3D%22650%22%20width%3D%22620%22%20height%3D%22260%22%20rx%3D%2222%22%2F%3E%3Crect%20x%3D%221260%22%20y%3D%22710%22%20width%3D%22130%22%20height%3D%22100%22%20rx%3D%2210%22%2F%3E%3Crect%20x%3D%221420%22%20y%3D%22710%22%20width%3D%22130%22%20height%3D%22100%22%20rx%3D%2210%22%2F%3E%3Crect%20x%3D%221580%22%20y%3D%22710%22%20width%3D%22130%22%20height%3D%22100%22%20rx%3D%2210%22%2F%3E%3C%2Fg%3E%3Cg%20stroke%3D%22%235ee38a%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20opacity%3D%22.7%22%3E%3Cpath%20d%3D%22M1290%20780h70%22%2F%3E%3Cpath%20d%3D%22M1450%20760h70%22%2F%3E%3Cpath%20d%3D%22M1610%20790h70%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%238aa5ba%22%20font-family%3D%22Arial%2Csans-serif%22%20font-size%3D%2228%22%20letter-spacing%3D%226%22%20opacity%3D%22.35%22%3E%3Ctext%20x%3D%221160%22%20y%3D%22620%22%3ESOC%20INTELLIGENCE%20%2F%20AIR-GAPPED%3C%2Ftext%3E%3Ctext%20x%3D%22110%22%20y%3D%22120%22%3EDETECT%20%E2%80%A2%20INVESTIGATE%20%E2%80%A2%20RESPOND%3C%2Ftext%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.22%22%20stroke%3D%22%2300e5ff%22%20fill%3D%22none%22%3E%3Ccircle%20cx%3D%22960%22%20cy%3D%22520%22%20r%3D%22210%22%2F%3E%3Ccircle%20cx%3D%22960%22%20cy%3D%22520%22%20r%3D%22290%22%2F%3E%3Cpath%20d%3D%22M670%20520h580M960%20230v580%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");background-size:cover;background-position:center top;background-attachment:fixed}
 [data-testid="stHeader"]{background:rgba(5,8,12,.75)}
 [data-testid="stMetric"]{background:linear-gradient(145deg,#101a24,#0a1118);border:1px solid #26384a;border-radius:14px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.22)}
@@ -589,29 +589,54 @@ with st.expander("Analyze local log lines", expanded=False):
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel"><div class="pt">SOC Analytics & Report Center</div>', unsafe_allow_html=True)
-st.caption("Offline data analytics over the currently analyzed evidence. Reports are generated locally; no data leaves this machine.")
+st.caption("Offline evidence analytics • percentages, risk percentiles, trends and detection graphs. No external or estimated figures are added.")
 if st.session_state.logs:
     ar = analytics_summary(st.session_state.logs)
-    ac1, ac2, ac3, ac4 = st.columns(4)
-    ac1.metric("Records", ar["records"])
-    ac2.metric("Unique Sources", ar["unique_sources"])
-    ac3.metric("Unique Targets", ar["unique_targets"])
-    ac4.metric("Attack Types", ar["unique_attack_types"])
-    st.markdown("**Severity distribution**")
+    ac1, ac2, ac3, ac4, ac5, ac6 = st.columns(6)
+    ac1.metric("Records", f"{ar['records']:,}")
+    ac2.metric("Unique Sources", f"{ar['unique_sources']:,}")
+    ac3.metric("Unique Targets", f"{ar['unique_targets']:,}")
+    ac4.metric("Attack Types", f"{ar['unique_attack_types']:,}")
+    ac5.metric("Alert Rate", f"{ar['alert_rate_pct']:.2f}%")
+    ac6.metric("Critical Rate", f"{ar['critical_rate_pct']:.2f}%")
+
+    st.markdown("**Evidence risk percentile profile**")
+    rp = ar["risk_percentiles"]
+    pc1, pc2, pc3, pc4, pc5 = st.columns(5)
+    pc1.metric("Current Mean", f"{ar['risk_percentile_current']:.1f}")
+    pc2.metric("P50", f"{rp['p50']:.1f}")
+    pc3.metric("P75", f"{rp['p75']:.1f}")
+    pc4.metric("P90", f"{rp['p90']:.1f}")
+    pc5.metric("P95", f"{rp['p95']:.1f}")
+    st.caption("Risk percentile values are derived from observed severity bands: CRITICAL 100, HIGH 80, WARNING 60, MEDIUM 40, LOW 20. They describe this evidence set; they are not external threat probabilities.")
+
+    st.markdown("**Severity distribution (%)**")
+    sev_pct_df = pd.DataFrame({
+        "severity": list(ar["severity_percentages"].keys()),
+        "percentage": list(ar["severity_percentages"].values()),
+    })
+    st.bar_chart(sev_pct_df.set_index("severity"), y="percentage")
+
+    st.markdown("**Severity distribution (records)**")
     sevdf = pd.DataFrame({"severity": list(ar["severity_counts"].keys()), "count": list(ar["severity_counts"].values())})
-    st.bar_chart(sevdf.set_index("severity"))
+    st.bar_chart(sevdf.set_index("severity"), y="count")
+
+    st.markdown("**Security activity trend**")
+    tr = analytics_trend(st.session_state.logs)
+    if not tr.empty:
+        trend_view = tr.set_index("period")[["records", "alerts", "critical"]]
+        st.line_chart(trend_view)
+
     st.markdown("**Top attack types**")
     top_attack_df = pd.DataFrame(list(ar["top_attack_types"].items()), columns=["attack_type","count"])
     if not top_attack_df.empty:
-        st.bar_chart(top_attack_df.set_index("attack_type"))
-    st.markdown("**Hourly trend**")
-    tr = analytics_trend(st.session_state.logs)
-    if not tr.empty:
-        st.line_chart(tr.set_index("period")[["records","alerts"]])
+        st.bar_chart(top_attack_df.set_index("attack_type"), y="count")
+
     with st.expander("Top sources / analytical detail", expanded=False):
         render_table([{"Source IP":k,"Events":v} for k,v in ar["top_sources"].items()])
         if st.session_state.analysis_result:
             st.json(st.session_state.analysis_result.get("risk_breakdown", {}))
+
     st.markdown("**Analyst findings & detection analytics**")
     fdf = findings_dataframe(st.session_state.analysis_result)
     if not fdf.empty:
@@ -623,7 +648,7 @@ if st.session_state.logs:
     rdf = rule_counts_dataframe(st.session_state.analysis_result)
     if not rdf.empty:
         with st.expander("Detection rule volume", expanded=False):
-            st.bar_chart(rdf.head(15).set_index("rule_id"))
+            st.bar_chart(rdf.head(15).set_index("rule_id"), y="count")
 
     st.markdown("**Download / print reports**")
     st.caption("Each report is generated from the exact evidence currently displayed above. No external or estimated figures are added.")
