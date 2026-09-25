@@ -583,6 +583,10 @@ history_rows = store.history(limit=100)
 if history_rows:
     history_view = [{k: r[k] for k in ["id","filename","format","size_bytes","uploaded_at","evidence_sha256","status"]} for r in history_rows]
     render_table(history_view)
+    upload_events = store.upload_history(limit=200)
+    st.caption(f"Upload events preserved: {len(upload_events)} • identical files are deduplicated in the evidence archive but every upload event remains in history.")
+    if upload_events:
+        render_table(upload_events[:50])
     choices = [f"{r['id']} • {r['filename']} • {r['uploaded_at']} • {r['evidence_sha256'][:12]}…" for r in history_rows]
     selected_idx = st.selectbox("Select preserved evidence", range(len(choices)), format_func=lambda i: choices[i], key="history_select")
     selected = history_rows[selected_idx]
