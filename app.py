@@ -17,7 +17,7 @@ from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
 from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status
-from analytics import summary as analytics_summary, build_dataframe as analytics_dataframe, trend as analytics_trend, findings_dataframe, attack_matrix, rule_counts_dataframe
+from analytics import summary as analytics_summary, trend as analytics_trend, findings_dataframe, attack_matrix, rule_counts_dataframe
 from reporting import export_bundle
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
