@@ -57,3 +57,16 @@ def test_xlsx_preserves_all_evidence_fields_and_records_and_is_print_ready():
     assert ws.page_setup.fitToWidth == 1
     assert ws.print_area == "'Evidence'!$A$1:$E$3"
     assert ws.oddFooter.center.text == "VANGUARD SOC • Page &P of &N"
+
+
+def test_xlsx_normalizes_timezone_aware_values():
+    from datetime import datetime, timezone
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from reporting import make_xlsx
+
+    rows = [{"timestamp": datetime(2026, 9, 26, 10, 0, tzinfo=timezone.utc), "message": "event"}]
+    payload = make_xlsx(rows, {"risk_score": 1, "alerts": [], "analyst_alerts": [], "incidents": [], "parse_coverage": 100}, "test")
+    wb = load_workbook(BytesIO(payload), data_only=False)
+    value = wb["Evidence"]["A2"].value
+    assert getattr(value, "tzinfo", None) is None
