@@ -1,99 +1,275 @@
-"""Offline multi-format SOC report generation. No network dependencies."""
+"""Offline multi-format SOC reporting. No network dependencies."""
 from __future__ import annotations
-from io import BytesIO
+
 from datetime import datetime, timezone
-from pathlib import Path
+from io import BytesIO
 from typing import Any
 import json
+
 import pandas as pd
+
 
 def _safe_name(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:80] or "vanguard_report"
 
-def report_context(rows: list[dict[str,Any]], analysis: dict[str,Any] | None, source: str) -> dict[str,Any]:
+
+def report_context(rows: list[dict[str, Any]], analysis: dict[str, Any] | None, source: str) -> dict[str, Any]:
     from analytics import summary
-    s=summary(rows)
-    return {"system":"Vanguard-SIEM","classification":"LOCAL DEFENSIVE ANALYTICS","source":source,
-            "generated_at":datetime.now(timezone.utc).isoformat(),"analytics":s,
-            "risk_score":(analysis or {}).get("risk_score",0),
-            "raw_alerts":len((analysis or {}).get("alerts",[])),
-            "finding_groups":len((analysis or {}).get("analyst_alerts",[])),
-            "incidents":len((analysis or {}).get("incidents",[]))}
+    s = summary(rows)
+    return {
+        "system": "Vanguard-SIEM",
+        "classification": "LOCAL DEFENSIVE ANALYTICS",
+        "source": source,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "analytics": s,
+        "risk_score": (analysis or {}).get("risk_score", 0),
+        "raw_alerts": len((analysis or {}).get("alerts", [])),
+        "finding_groups": len((analysis or {}).get("analyst_alerts", [])),
+        "incidents": len((analysis or {}).get("incidents", [])),
+        "parse_coverage": (analysis or {}).get("parse_coverage", 0),
+        "evidence_sha256": (analysis or {}).get("evidence_sha256", ""),
+    }
+
 
 def make_pdf(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report") -> bytes:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import mm
-    ctx=report_context(rows,analysis,source); s=ctx["analytics"]; styles=getSampleStyleSheet()
-    out=BytesIO(); doc=SimpleDocTemplate(out,pagesize=A4,rightMargin=14*mm,leftMargin=14*mm,topMargin=14*mm,bottomMargin=14*mm)
-    story=[Paragraph(title,styles["Title"]),Paragraph(f"Source: {source}<br/>Generated: {ctx['generated_at']}",styles["Normal"]),Spacer(1,8)]
-    story.append(Table([["Metric","Value"],["Records",s["records"]],["Unique sources",s["unique_sources"]],["Unique targets",s["unique_targets"]],["Risk score",ctx["risk_score"]],["Raw alerts",ctx["raw_alerts"]],["Finding groups",ctx["finding_groups"]],["Incidents",ctx["incidents"]]],repeatRows=1))
-    story += [Spacer(1,10),Paragraph("Severity distribution",styles["Heading2"])]
-    story.append(Table([["Severity","Count"]]+[[k,v] for k,v in s["severity_counts"].items()],repeatRows=1))
-    story += [Spacer(1,10),Paragraph("Top attack types",styles["Heading2"])]
-    story.append(Table([["Attack type","Count"]]+[[str(k),v] for k,v in s["top_attack_types"].items()],repeatRows=1))
-    story += [Spacer(1,10),Paragraph("Top sources",styles["Heading2"])]
-    story.append(Table([["Source IP","Events"]]+[[str(k),v] for k,v in s["top_sources"].items()],repeatRows=1))
-    story += [Spacer(1,10),Paragraph("Evidence records",styles["Heading2"])]
-    data=[["Event ID","Time","Severity","Source","Attack type"]]
+    from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ctx = report_context(rows, analysis, source)
+    s = ctx["analytics"]
+    out = BytesIO()
+    doc = SimpleDocTemplate(out, pagesize=A4, rightMargin=14 * mm, leftMargin=14 * mm, topMargin=14 * mm, bottomMargin=14 * mm)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(title, styles["Title"]),
+        Paragraph(f"Source: {source}<br/>Generated: {ctx['generated_at']}<br/>Evidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}", styles["Normal"]),
+        Spacer(1, 8),
+    ]
+    metrics = [
+        ["Metric", "Value"], ["Records", s["records"]], ["Unique sources", s["unique_sources"]],
+        ["Unique targets", s["unique_targets"]], ["Alert rate", f"{s['alert_rate_pct']}%"],
+        ["Critical rate", f"{s['critical_rate_pct']}%"], ["Parse coverage", f"{ctx['parse_coverage']}%"],
+        ["Risk score", ctx["risk_score"]], ["Raw alerts", ctx["raw_alerts"]],
+        ["Analyst finding groups", ctx["finding_groups"]], ["Incidents", ctx["incidents"]],
+    ]
+    story.append(Table(metrics, repeatRows=1))
+    story += [Spacer(1, 10), Paragraph("Severity distribution", styles["Heading2"])]
+    story.append(Table([["Severity", "Count"]] + [[k, v] for k, v in s["severity_counts"].items()], repeatRows=1))
+    story += [Spacer(1, 10), Paragraph("Top attack types", styles["Heading2"])]
+    story.append(Table([["Attack type", "Count"]] + [[str(k), v] for k, v in s["top_attack_types"].items()], repeatRows=1))
+
+    tr = __import__("analytics").trend(rows)
+    if not tr.empty:
+        fig = plt.figure(figsize=(7.0, 2.5))
+        ax = fig.add_subplot(111)
+        ax.plot(tr["period"], tr["records"], label="Records")
+        ax.plot(tr["period"], tr["alerts"], label="Alerts")
+        ax.set_title("Evidence volume and alert trend")
+        ax.legend()
+        ax.grid(alpha=0.2)
+        fig.autofmt_xdate()
+        image = BytesIO()
+        fig.savefig(image, format="png", dpi=140, bbox_inches="tight")
+        plt.close(fig)
+        image.seek(0)
+        story += [Spacer(1, 8), Paragraph("Trend", styles["Heading2"]), Image(image, width=175 * mm, height=62 * mm)]
+
+    findings = __import__("analytics").findings_dataframe(analysis)
+    if not findings.empty:
+        story += [Spacer(1, 8), Paragraph("Analyst findings", styles["Heading2"])]
+        data = [["ID", "Rule", "Severity", "Confidence", "Count"]]
+        data += [[str(r.alert_id), str(r.rule_id), str(r.severity), str(r.confidence), str(r["count"])] for _, r in findings.head(100).iterrows()]
+        story.append(Table(data, repeatRows=1, style=TableStyle([("GRID", (0, 0), (-1, -1), .25, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 7)])))
+
+    story += [PageBreak(), Paragraph("Evidence sample (first 500 records)", styles["Heading2"])]
+    data = [["Event ID", "Time", "Severity", "Source", "Attack type"]]
     for r in rows[:500]:
-        data.append([str(r.get("event_id","")),str(r.get("timestamp","")),str(r.get("severity","")),str(r.get("source_ip","")),str(r.get("attack_type",""))[:70]])
-    t=Table(data,repeatRows=1)
-    t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),.25,colors.grey),("FONTSIZE",(0,0),(-1,-1),6),("VALIGN",(0,0),(-1,-1),"TOP")]))
-    story += [t]; doc.build(story); return out.getvalue()
+        data.append([str(r.get("event_id", "")), str(r.get("timestamp", "")), str(r.get("severity", "")), str(r.get("source_ip", "")), str(r.get("attack_type", ""))[:70]])
+    story.append(Table(data, repeatRows=1, style=TableStyle([("GRID", (0, 0), (-1, -1), .25, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 6), ("VALIGN", (0, 0), (-1, -1), "TOP")])))
+
+    doc.build(story)
+    return out.getvalue()
+
 
 def make_docx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report") -> bytes:
     from docx import Document
-    d=Document(); ctx=report_context(rows,analysis,source); s=ctx["analytics"]
-    d.add_heading(title,0); d.add_paragraph(f"Source: {source}\nGenerated: {ctx['generated_at']}")
-    d.add_heading("Executive metrics",1)
-    table=d.add_table(rows=1, cols=2); table.rows[0].cells[0].text="Metric"; table.rows[0].cells[1].text="Value"
-    for k,v in [("Records",s["records"]),("Unique sources",s["unique_sources"]),("Unique targets",s["unique_targets"]),("Risk score",ctx["risk_score"]),("Raw alerts",ctx["raw_alerts"]),("Finding groups",ctx["finding_groups"]),("Incidents",ctx["incidents"])]:
-        c=table.add_row().cells; c[0].text=k; c[1].text=str(v)
-    d.add_heading("Severity distribution",1)
-    for k,v in s["severity_counts"].items(): d.add_paragraph(f"{k}: {v}")
-    d.add_heading("Top attack types",1)
-    for k,v in s["top_attack_types"].items(): d.add_paragraph(f"{k}: {v}")
-    d.add_heading("Evidence sample",1)
-    t=d.add_table(rows=1,cols=5)
-    for c,h in zip(t.rows[0].cells,["Event ID","Time","Severity","Source","Attack"]): c.text=h
+    from docx.shared import Inches
+    ctx = report_context(rows, analysis, source)
+    s = ctx["analytics"]
+    d = Document()
+    d.add_heading(title, 0)
+    d.add_paragraph(f"Source: {source}\nGenerated: {ctx['generated_at']}\nEvidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}")
+    d.add_heading("Executive analytics", 1)
+    table = d.add_table(rows=1, cols=2)
+    table.style = "Table Grid"
+    table.rows[0].cells[0].text, table.rows[0].cells[1].text = "Metric", "Value"
+    for k, v in [
+        ("Records", s["records"]), ("Unique sources", s["unique_sources"]), ("Unique targets", s["unique_targets"]),
+        ("Alert rate", f"{s['alert_rate_pct']}%"), ("Critical rate", f"{s['critical_rate_pct']}%"),
+        ("Parse coverage", f"{ctx['parse_coverage']}%"), ("Risk score", ctx["risk_score"]),
+        ("Raw alerts", ctx["raw_alerts"]), ("Analyst finding groups", ctx["finding_groups"]), ("Incidents", ctx["incidents"]),
+    ]:
+        cells = table.add_row().cells
+        cells[0].text, cells[1].text = k, str(v)
+    d.add_heading("Severity distribution", 1)
+    for k, v in s["severity_counts"].items():
+        d.add_paragraph(f"{k}: {v}")
+    d.add_heading("Top attack types", 1)
+    for k, v in s["top_attack_types"].items():
+        d.add_paragraph(f"{k}: {v}")
+    findings = __import__("analytics").findings_dataframe(analysis)
+    if not findings.empty:
+        d.add_heading("Analyst findings", 1)
+        t = d.add_table(rows=1, cols=5); t.style = "Table Grid"
+        for cell, h in zip(t.rows[0].cells, ["ID", "Rule", "Severity", "Confidence", "Count"]): cell.text = h
+        for _, row in findings.head(100).iterrows():
+            cells = t.add_row().cells
+            for cell, value in zip(cells, [row.alert_id, row.rule_id, row.severity, row.confidence, row["count"]]): cell.text = str(value)
+    d.add_heading("Evidence sample (first 500 records)", 1)
+    t = d.add_table(rows=1, cols=5); t.style = "Table Grid"
+    for cell, h in zip(t.rows[0].cells, ["Event ID", "Time", "Severity", "Source", "Attack"]): cell.text = h
     for r in rows[:500]:
-        c=t.add_row().cells
-        vals=[r.get("event_id",""),r.get("timestamp",""),r.get("severity",""),r.get("source_ip",""),r.get("attack_type","")]
-        for cell,val in zip(c,vals): cell.text=str(val)[:100]
-    out=BytesIO(); d.save(out); return out.getvalue()
+        cells = t.add_row().cells
+        for cell, value in zip(cells, [r.get("event_id", ""), r.get("timestamp", ""), r.get("severity", ""), r.get("source_ip", ""), r.get("attack_type", "")]): cell.text = str(value)[:100]
+    out = BytesIO(); d.save(out); return out.getvalue()
+
 
 def make_xlsx(rows, analysis, source) -> bytes:
     from openpyxl import Workbook
-    from openpyxl.chart import BarChart, Reference
+    from openpyxl.chart import BarChart, LineChart, Reference
+    from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
-    ctx=report_context(rows,analysis,source); s=ctx["analytics"]; wb=Workbook(); ws=wb.active; ws.title="Summary"
-    metrics=[("Source",source),("Generated",ctx["generated_at"]),("Records",s["records"]),("Unique sources",s["unique_sources"]),("Unique targets",s["unique_targets"]),("Risk score",ctx["risk_score"]),("Raw alerts",ctx["raw_alerts"]),("Finding groups",ctx["finding_groups"]),("Incidents",ctx["incidents"])]
-    for i,(k,v) in enumerate(metrics,1): ws.cell(i,1,k); ws.cell(i,2,v)
-    sev=wb.create_sheet("Severity"); sev.append(["Severity","Count"]); [sev.append([k,v]) for k,v in s["severity_counts"].items()]
-    chart=BarChart(); chart.title="Severity"; chart.y_axis.title="Events"; chart.x_axis.title="Severity"; chart.add_data(Reference(sev,min_col=2,min_row=1,max_row=1+len(s["severity_counts"])),titles_from_data=True); chart.set_categories(Reference(sev,min_col=1,min_row=2,max_row=1+len(s["severity_counts"]))); sev.add_chart(chart,"D2")
-    ev=wb.create_sheet("Evidence"); cols=sorted({k for r in rows[:5000] for k in r}) if rows else ["event_id"]; ev.append(cols)
-    for r in rows[:5000]: ev.append([r.get(c,"") for c in cols])
+
+    ctx = report_context(rows, analysis, source); s = ctx["analytics"]
+    wb = Workbook()
+    ws = wb.active; ws.title = "Executive Summary"
+    metrics = [
+        ("System", ctx["system"]), ("Classification", ctx["classification"]), ("Source", source),
+        ("Generated", ctx["generated_at"]), ("Evidence SHA-256", ctx.get("evidence_sha256", "")),
+        ("Records", s["records"]), ("Unique sources", s["unique_sources"]), ("Unique targets", s["unique_targets"]),
+        ("Alert rate %", s["alert_rate_pct"]), ("Critical rate %", s["critical_rate_pct"]),
+        ("Parse coverage %", ctx["parse_coverage"]), ("Risk score", ctx["risk_score"]),
+        ("Raw alerts", ctx["raw_alerts"]), ("Finding groups", ctx["finding_groups"]), ("Incidents", ctx["incidents"]),
+    ]
+    for i, (k, v) in enumerate(metrics, 1): ws.cell(i, 1, k); ws.cell(i, 2, v)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    sev = wb.create_sheet("Severity"); sev.append(["Severity", "Count"])
+    for k, v in s["severity_counts"].items(): sev.append([k, v])
+    chart = BarChart(); chart.title = "Severity distribution"; chart.y_axis.title = "Events"
+    chart.add_data(Reference(sev, min_col=2, min_row=1, max_row=1 + len(s["severity_counts"])), titles_from_data=True)
+    chart.set_categories(Reference(sev, min_col=1, min_row=2, max_row=1 + len(s["severity_counts"]))); sev.add_chart(chart, "D2")
+
+    attacks = wb.create_sheet("Attack Types"); attacks.append(["Attack type", "Count"])
+    for k, v in s["top_attack_types"].items(): attacks.append([str(k), v])
+
+    sources = wb.create_sheet("Top Sources"); sources.append(["Source IP", "Events"])
+    for k, v in s["top_sources"].items(): sources.append([str(k), v])
+
+    trend = __import__("analytics").trend(rows)
+    trws = wb.create_sheet("Trend"); trws.append(["Period", "Records", "Alerts", "Critical"])
+    for _, row in trend.iterrows(): trws.append([row["period"].to_pydatetime(), int(row["records"]), int(row["alerts"]), int(row["critical"])])
+    if len(trws.rows) > 1:
+        line = LineChart(); line.title = "Hourly evidence trend"; line.y_axis.title = "Count"
+        line.add_data(Reference(trws, min_col=2, max_col=4, min_row=1, max_row=trws.max_row), titles_from_data=True)
+        line.set_categories(Reference(trws, min_col=1, min_row=2, max_row=trws.max_row)); trws.add_chart(line, "F2")
+
+    findings = __import__("analytics").findings_dataframe(analysis)
+    fws = wb.create_sheet("Analyst Findings")
+    if not findings.empty:
+        fws.append(list(findings.columns))
+        for row in findings.itertuples(index=False): fws.append(list(row))
+    else:
+        fws.append(["No analyst findings"])
+
+    ev = wb.create_sheet("Evidence")
+    cols = ["event_id", "timestamp", "severity", "source_ip", "target_endpoint", "attack_type", "description", "raw_sha256"]
+    ev.append(cols)
+    for r in rows: ev.append([r.get(c, "") for c in cols])
     for sheet in wb.worksheets:
-        for col in range(1,sheet.max_column+1): sheet.column_dimensions[get_column_letter(col)].width=min(45,max(12,max((len(str(sheet.cell(row=row,column=col).value or "")) for row in range(1,min(sheet.max_row,100)+1)),default=12)+2))
-    out=BytesIO(); wb.save(out); return out.getvalue()
+        sheet.freeze_panes = "A2"
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor="1B2633")
+        for col in range(1, sheet.max_column + 1):
+            width = max((len(str(sheet.cell(row=row, column=col).value or "")) for row in range(1, min(sheet.max_row, 100) + 1)), default=12)
+            sheet.column_dimensions[get_column_letter(col)].width = min(55, max(12, width + 2))
+    out = BytesIO(); wb.save(out); return out.getvalue()
+
 
 def make_pptx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report") -> bytes:
     from pptx import Presentation
-    from pptx.util import Inches
-    ctx=report_context(rows,analysis,source); s=ctx["analytics"]; prs=Presentation()
-    slide=prs.slides.add_slide(prs.slide_layouts[0]); slide.shapes.title.text=title; slide.placeholders[1].text=f"{source}\n{ctx['generated_at']}"
-    slide=prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text="Executive analytics"
-    box=slide.shapes.add_textbox(Inches(1),Inches(1.5),Inches(11),Inches(4)).text_frame
-    box.text="Records: %s\nRisk score: %s\nRaw alerts: %s\nFinding groups: %s\nIncidents: %s\nUnique sources: %s\nUnique targets: %s" % (s["records"],ctx["risk_score"],ctx["raw_alerts"],ctx["finding_groups"],ctx["incidents"],s["unique_sources"],s["unique_targets"])
-    slide=prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text="Severity distribution"
-    tb=slide.shapes.add_textbox(Inches(1),Inches(1.4),Inches(11),Inches(4)).text_frame; tb.text="\n".join(f"{k}: {v}" for k,v in s["severity_counts"].items())
-    slide=prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text="Top attack types"
-    tb=slide.shapes.add_textbox(Inches(1),Inches(1.4),Inches(11),Inches(5)).text_frame; tb.text="\n".join(f"{k}: {v}" for k,v in s["top_attack_types"].items()) or "No detected attack types."
-    out=BytesIO(); prs.save(out); return out.getvalue()
+    from pptx.util import Inches, Pt
 
-def export_bundle(rows, analysis, source, basename="vanguard_soc_report") -> dict[str,bytes]:
-    return {"pdf":make_pdf(rows,analysis,source),"docx":make_docx(rows,analysis,source),"xlsx":make_xlsx(rows,analysis,source),"pptx":make_pptx(rows,analysis,source),
-            "json":json.dumps(report_context(rows,analysis,source),indent=2).encode()}
+    ctx = report_context(rows, analysis, source); s = ctx["analytics"]
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[0]); slide.shapes.title.text = title
+    slide.placeholders[1].text = f"{source}\n{ctx['generated_at']}\nEvidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}"
+    slide = prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text = "Executive analytics"
+    tf = slide.shapes.add_textbox(Inches(1), Inches(1.2), Inches(11), Inches(5)).text_frame
+    tf.text = "\n".join([
+        f"Records: {s['records']:,}", f"Unique sources: {s['unique_sources']:,}", f"Unique targets: {s['unique_targets']:,}",
+        f"Alert rate: {s['alert_rate_pct']}%", f"Critical rate: {s['critical_rate_pct']}%", f"Parse coverage: {ctx['parse_coverage']}%",
+        f"Risk score: {ctx['risk_score']}", f"Raw alerts: {ctx['raw_alerts']:,}", f"Analyst finding groups: {ctx['finding_groups']:,}",
+        f"Incidents: {ctx['incidents']:,}",
+    ])
+    for p in tf.paragraphs: p.font.size = Pt(22)
+
+    slide = prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text = "Severity distribution"
+    tf = slide.shapes.add_textbox(Inches(1), Inches(1.3), Inches(11), Inches(5)).text_frame
+    tf.text = "\n".join(f"{k}: {v:,}" for k, v in s["severity_counts"].items())
+
+    slide = prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text = "Top attack types"
+    tf = slide.shapes.add_textbox(Inches(1), Inches(1.3), Inches(11), Inches(5)).text_frame
+    tf.text = "\n".join(f"{k}: {v:,}" for k, v in s["top_attack_types"].items()) or "No detected attack types."
+
+    trend = __import__("analytics").trend(rows)
+    if not trend.empty:
+        slide = prs.slides.add_slide(prs.slide_layouts[5]); slide.shapes.title.text = "Hourly trend"
+        tf = slide.shapes.add_textbox(Inches(1), Inches(1.3), Inches(11), Inches(5)).text_frame
+        tf.text = "\n".join(f"{row.period}: records={int(row.records):,}, alerts={int(row.alerts):,}, critical={int(row.critical):,}" for row in trend.tail(20).itertuples())
+    out = BytesIO(); prs.save(out); return out.getvalue()
+
+
+def make_csv(rows) -> bytes:
+    df = pd.DataFrame(rows or [])
+    return df.to_csv(index=False).encode("utf-8")
+
+
+def make_html(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report") -> bytes:
+    ctx = report_context(rows, analysis, source)
+    s = ctx["analytics"]
+    findings = __import__("analytics").findings_dataframe(analysis)
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>
+<style>body{{font-family:Arial,sans-serif;margin:32px;color:#17212b}}table{{border-collapse:collapse;width:100%;margin:12px 0}}th,td{{border:1px solid #bbb;padding:6px;font-size:12px}}th{{background:#e8eef3}}@media print{{button{{display:none}}}}</style>
+</head><body><button onclick="window.print()">Print report</button><h1>{title}</h1>
+<p>Source: {source}<br>Generated: {ctx['generated_at']}<br>Evidence SHA-256: {ctx.get('evidence_sha256') or 'not supplied'}</p>
+<h2>Executive analytics</h2><table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Records</td><td>{s['records']:,}</td></tr><tr><td>Unique sources</td><td>{s['unique_sources']:,}</td></tr>
+<tr><td>Unique targets</td><td>{s['unique_targets']:,}</td></tr><tr><td>Alert rate</td><td>{s['alert_rate_pct']}%</td></tr>
+<tr><td>Critical rate</td><td>{s['critical_rate_pct']}%</td></tr><tr><td>Risk score</td><td>{ctx['risk_score']}</td></tr>
+<tr><td>Raw alerts</td><td>{ctx['raw_alerts']:,}</td></tr><tr><td>Analyst finding groups</td><td>{ctx['finding_groups']:,}</td></tr>
+<tr><td>Incidents</td><td>{ctx['incidents']:,}</td></tr></table>
+<h2>Severity</h2><table><tr><th>Severity</th><th>Count</th></tr>{''.join(f'<tr><td>{k}</td><td>{v:,}</td></tr>' for k,v in s['severity_counts'].items())}</table>
+<h2>Top attack types</h2><table><tr><th>Attack type</th><th>Count</th></tr>{''.join(f'<tr><td>{str(k)}</td><td>{v:,}</td></tr>' for k,v in s['top_attack_types'].items())}</table>
+</body></html>"""
+    return html.encode("utf-8")
+
+
+def export_bundle(rows, analysis, source, basename="vanguard_soc_report") -> dict[str, bytes]:
+    return {
+        "pdf": make_pdf(rows, analysis, source),
+        "docx": make_docx(rows, analysis, source),
+        "xlsx": make_xlsx(rows, analysis, source),
+        "pptx": make_pptx(rows, analysis, source),
+        "csv": make_csv(rows),
+        "html": make_html(rows, analysis, source),
+        "json": json.dumps(report_context(rows, analysis, source), indent=2).encode("utf-8"),
+    }
