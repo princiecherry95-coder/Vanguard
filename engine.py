@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable
 
+from detection_registry import get_rule
+from risk import analysis_risk
+
 
 MAX_LINE_LENGTH = 16_384
 MAX_FIELD_LENGTH = 2_048
@@ -406,18 +409,31 @@ def analyze_events(events: Iterable[NormalizedEvent]) -> dict[str, object]:
     behavior_alerts = detect_behavior(events)
     alerts.extend(behavior_alerts)
     incidents = correlate(alerts)
-    weights = {"LOW": 1, "MEDIUM": 2, "HIGH": 4, "CRITICAL": 8}
-    alert_points = sum(weights.get(a.severity, 1) for a in alerts)
-    incident_points = min(DETECTION_POLICY["risk_incident_cap"], len(incidents) * 5)
-    risk = min(100, alert_points + incident_points)
+
+    # Enrich deterministic findings with versioned analyst metadata.
+    for alert in alerts:
+        rule = get_rule(alert.rule_id)
+        alert.evidence = dict(alert.evidence)
+        alert.evidence.setdefault("rule_version", rule.version)
+        alert.evidence.setdefault("confidence", rule.confidence)
+        alert.evidence.setdefault("category", rule.category)
+        alert.evidence.setdefault("mitre_technique", rule.mitre_technique or "")
+        alert.evidence.setdefault("analyst_guidance", rule.analyst_guidance)
+
+    # Keep every raw alert as evidence; group repeated findings for analysts.
+    from triage import build_analyst_queue
+    analyst_alerts = build_analyst_queue(alerts, DETECTION_POLICY["correlation_window_seconds"])
+    risk = analysis_risk(analyst_alerts)
     by_severity = {level: sum(a.severity == level for a in alerts) for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW")}
-    by_rule = {}
+        by_rule = {}
     for alert in alerts:
         by_rule[alert.rule_id] = by_rule.get(alert.rule_id, 0) + 1
     sources = sorted({e.source_ip for e in events if e.source_ip})
     destinations = sorted({e.destination_ip for e in events if e.destination_ip})
     return {"events": events, "alerts": alerts, "behavior_alerts": behavior_alerts, "incidents": incidents,
-            "risk_score": risk, "risk_breakdown": {"alert_points": alert_points, "incident_points": incident_points}, "severity_counts": by_severity, "rule_counts": by_rule,
+            "analyst_alerts": analyst_alerts, "risk_score": risk,
+            "risk_breakdown": {"raw_alerts": len(alerts), "finding_groups": len(analyst_alerts), "incident_count": len(incidents)},
+            "severity_counts": by_severity, "rule_counts": by_rule,
             "unique_sources": sources, "unique_destinations": destinations,
             "parse_coverage": round((sum(bool(e.message) for e in events) / len(events) * 100), 1) if events else 0.0}
 
