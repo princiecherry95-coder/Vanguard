@@ -34,6 +34,9 @@ CREATE INDEX IF NOT EXISTS idx_analysis_findings_run ON analysis_findings(run_id
 CREATE TABLE IF NOT EXISTS evidence_uploads (id INTEGER PRIMARY KEY AUTOINCREMENT,evidence_sha256 TEXT NOT NULL,filename TEXT NOT NULL,format TEXT NOT NULL,size_bytes INTEGER NOT NULL,uploaded_at TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'LOCAL_UPLOAD');
 CREATE INDEX IF NOT EXISTS idx_uploads_digest ON evidence_uploads(evidence_sha256);
 CREATE INDEX IF NOT EXISTS idx_uploads_time ON evidence_uploads(uploaded_at);
+CREATE TABLE IF NOT EXISTS export_events (id INTEGER PRIMARY KEY AUTOINCREMENT,evidence_sha256 TEXT NOT NULL DEFAULT '',analysis_run_id INTEGER,format TEXT NOT NULL,filename TEXT NOT NULL,size_bytes INTEGER NOT NULL,file_sha256 TEXT NOT NULL,exported_at TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'COMPLETED',source TEXT NOT NULL DEFAULT 'REPORT_CENTER');
+CREATE INDEX IF NOT EXISTS idx_exports_evidence ON export_events(evidence_sha256);
+CREATE INDEX IF NOT EXISTS idx_exports_time ON export_events(exported_at);
 CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     evidence_sha256 TEXT NOT NULL,
@@ -121,6 +124,33 @@ class EvidenceStore:
             return [dict(zip(cols,row)) for row in rows]
         finally:
             conn.close()
+
+    def record_export_event(self, evidence_sha256: str | None, format_name: str, filename: str, data: bytes, analysis_run_id: int | None = None, exported_at: str | None = None, status: str = "COMPLETED", source: str = "REPORT_CENTER") -> int:
+        digest = hashlib.sha256(data).hexdigest()
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "INSERT INTO export_events(evidence_sha256,analysis_run_id,format,filename,size_bytes,file_sha256,exported_at,status,source) VALUES(?,?,?,?,?,?,?,?,?)",
+                (evidence_sha256 or "", analysis_run_id, str(format_name).upper(), Path(filename).name, len(data), digest, exported_at or datetime.now(timezone.utc).isoformat(), status, source),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def export_history(self, evidence_sha256: str | None = None, limit: int = 200) -> list[dict]:
+        conn = self._connect()
+        try:
+            lim = max(1, min(limit, 1000))
+            if evidence_sha256:
+                rows = conn.execute("SELECT id,evidence_sha256,analysis_run_id,format,filename,size_bytes,file_sha256,exported_at,status,source FROM export_events WHERE evidence_sha256=? ORDER BY exported_at DESC LIMIT ?", (evidence_sha256, lim)).fetchall()
+            else:
+                rows = conn.execute("SELECT id,evidence_sha256,analysis_run_id,format,filename,size_bytes,file_sha256,exported_at,status,source FROM export_events ORDER BY exported_at DESC LIMIT ?", (lim,)).fetchall()
+            cols = ["id","evidence_sha256","analysis_run_id","format","filename","size_bytes","file_sha256","exported_at","status","source"]
+            return [dict(zip(cols, row)) for row in rows]
+        finally:
+            conn.close()
+
 
     def history(self, limit: int = 100) -> list[dict]:
         conn = self._connect()
