@@ -8,6 +8,8 @@ def main() -> None:
     for name in MODULES:
         __import__(name)
     from soc_pipeline import analyze_bytes
+    from reporting import make_pdf, make_docx, make_xlsx
+
     sample = (
         b"2026-09-23T10:00:00+00:00 sshd: Failed password for user=admin from 10.10.1.7\n"
         b"2026-09-23T10:00:10+00:00 10.10.1.7 GET /search?q=' OR '1'='1' HTTP/1.1\n"
@@ -16,6 +18,20 @@ def main() -> None:
     assert result["records"] == 2
     assert len(result["sha256"]) == 64
     assert result["analysis"]["alerts"]
+
+    rows = [
+        {"timestamp": "2026-09-23T10:00:00+00:00", "message": "failed password", "source": "10.10.1.7"},
+        {"timestamp": "2026-09-23T10:00:10+00:00", "message": "SQL injection probe", "source": "10.10.1.7"},
+    ]
+    analysis = result["analysis"]
+    pdf = make_pdf(rows, analysis, "runtime-smoke.log")
+    docx = make_docx(rows, analysis, "runtime-smoke.log")
+    xlsx = make_xlsx(rows, analysis, "runtime-smoke.log")
+    assert pdf[:5] == b"%PDF-"
+    assert docx[:2] == b"PK"
+    assert xlsx[:2] == b"PK"
+    print("Vanguard-SIEM export smoke test: PASS (PDF/DOCX/XLSX)")
+
     env = dict(os.environ)
     env["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     proc = subprocess.Popen(
