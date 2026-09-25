@@ -194,7 +194,7 @@ if st.session_state.analysis_summary:
     if st.session_state.analysis_evidence_sha256:
         st.code(f"Evidence SHA-256: {st.session_state.analysis_evidence_sha256}", language="text")
     if summary["rule_counts"]:
-        st.dataframe(pd.DataFrame([{"Detection Rule": k, "Matches": v} for k, v in sorted(summary["rule_counts"].items(), key=lambda x: (-x[1], x[0]))]), use_container_width=True, hide_index=True)
+        render_table([{"Detection Rule": k, "Matches": v} for k, v in sorted(summary["rule_counts"].items(), key=lambda x: (-x[1], x[0]))])
     else:
         st.info("Analysis completed. No configured detection rule matched the uploaded evidence.")
 
