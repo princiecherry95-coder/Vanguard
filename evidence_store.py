@@ -184,8 +184,12 @@ class EvidenceStore:
                 rule_id = str(f.get("rule_id", "UNKNOWN")).strip()
                 reason = " ".join(str(f.get("reason", "")).split()).strip()
                 mitre = str(f.get("mitre_technique") or "").strip()
-                identity = f"{rule_id}|{reason}|{mitre}"
-                key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+                alert_id = str(f.get("alert_id") or "").strip()
+                if alert_id:
+                    key = alert_id
+                else:
+                    identity = f"{rule_id}|{reason}|{mitre}"
+                    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
                 conn.execute(
                     "INSERT OR REPLACE INTO analysis_findings "
                     "(run_id,evidence_sha256,finding_key,finding_id,rule_id,rule_version,severity,confidence,"
