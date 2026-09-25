@@ -225,8 +225,9 @@ if st.session_state.analysis_summary:
     # currently loaded evidence set. Empty evidence produces no synthetic chart.
     evidence_metrics = analytics_summary(st.session_state.logs)
     st.markdown("### Intelligence Analytics — Evidence Grounded")
+    data_class = "SIMULATED / DEMO DATA — NOT OPERATIONAL INTELLIGENCE" if st.session_state.demo_mode else "OBSERVED LOCAL EVIDENCE — OPERATIONAL DATA VIEW"
     st.caption(
-        "All figures are computed from the loaded evidence in this session. "
+        f"Data classification: {data_class}. All figures are computed from the loaded evidence in this session. "
         "Vanguard does not invent zeroes, estimates, or live external telemetry. "
         f"Evidence SHA-256: {st.session_state.analysis_evidence_sha256 or 'NOT AVAILABLE'}"
     )
