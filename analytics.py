@@ -27,17 +27,32 @@ def summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "severity_counts": {s: 0 for s in SEVERITY_ORDER},
             "top_sources": {}, "top_attack_types": {}, "hourly": {},
             "alert_rate_pct": 0.0, "critical_rate_pct": 0.0,
+            "severity_percentages": {s: 0.0 for s in SEVERITY_ORDER},
+            "risk_percentiles": {"p50": 0.0, "p75": 0.0, "p90": 0.0, "p95": 0.0},
+            "risk_percentile_current": 0.0,
             "first_seen": None, "last_seen": None,
         }
     severity_counts = {s: int((df["severity"] == s).sum()) for s in SEVERITY_ORDER}
     alert_mask = df["severity"].isin(["CRITICAL", "HIGH", "WARNING", "MEDIUM"])
     valid_times = df["timestamp"].dropna()
+    total = len(df)
+    severity_percentages = {s: round((count / total) * 100, 2) if total else 0.0 for s, count in severity_counts.items()}
+    risk_values = df["severity"].map({"CRITICAL": 100, "HIGH": 80, "WARNING": 60, "MEDIUM": 40, "LOW": 20}).fillna(0)
+    risk_percentiles = {
+        "p50": round(float(risk_values.quantile(0.50)), 2),
+        "p75": round(float(risk_values.quantile(0.75)), 2),
+        "p90": round(float(risk_values.quantile(0.90)), 2),
+        "p95": round(float(risk_values.quantile(0.95)), 2),
+    }
     return {
         "records": int(len(df)),
         "unique_sources": int(df["source_ip"].replace({"N/A": pd.NA, "": pd.NA}).nunique()),
         "unique_targets": int(df["target_endpoint"].replace({"N/A": pd.NA, "": pd.NA}).nunique()),
         "unique_attack_types": int(df["attack_type"].replace({"N/A": pd.NA, "": pd.NA}).nunique()),
         "severity_counts": severity_counts,
+        "severity_percentages": severity_percentages,
+        "risk_percentiles": risk_percentiles,
+        "risk_percentile_current": round(float(risk_values.mean()), 2),
         "top_sources": df["source_ip"].replace({"N/A": pd.NA, "": pd.NA}).value_counts().head(10).to_dict(),
         "top_attack_types": df["attack_type"].replace({"N/A": pd.NA, "": pd.NA}).value_counts().head(10).to_dict(),
         "hourly": hourly_counts(df),
