@@ -35,8 +35,11 @@ jobs:
         run: python -m pip check
       - name: Pytest regression suite
         run: python -m pytest -q
-      - name: Ruff lint
-        run: python -m ruff check --output-format=github app.py engine.py ingestion.py audit.py evidence_store.py detection_registry.py risk.py triage.py soc_pipeline.py
+      - name: Ruff correctness gate
+        run: python -m ruff check --output-format=github app.py engine.py ingestion.py audit.py evidence_store.py detection_registry.py risk.py triage.py soc_pipeline.py export_service.py
+      - name: Ruff advisory quality report
+        continue-on-error: true
+        run: python -m ruff check --output-format=github app.py engine.py ingestion.py audit.py evidence_store.py detection_registry.py risk.py triage.py soc_pipeline.py export_service.py
       - name: Bandit security scan
         run: python -m bandit -q -r engine.py ingestion.py audit.py evidence_store.py detection_registry.py risk.py triage.py soc_pipeline.py -lll
       - name: Dependency vulnerability audit
