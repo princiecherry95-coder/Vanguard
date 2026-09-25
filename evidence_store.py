@@ -6,7 +6,6 @@ controlled source location.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from typing import Iterable
@@ -57,8 +56,7 @@ class EvidenceStore:
         return conn
 
     def save_analysis(self, bundle: dict, analyst_alerts: Iterable[dict]) -> None:
-        analysis = bundle["analysis"]
-        with self._connect() as conn:
+            with self._connect() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO evidence_sets(sha256,filename,format,record_count,completed_at) VALUES(?,?,?,?,?)",
                 (bundle["sha256"], bundle["filename"], bundle["format"], bundle["records"], bundle["completed_at"]),
