@@ -282,7 +282,8 @@ if st.session_state.analysis_summary:
         st.info("Detection coverage is unavailable because the evidence set is empty.")
 
     st.markdown("**Data Integrity**")
-    st.caption(f'{dup["unique_events"]:,} unique event fingerprints from {dup["records"]:,} records • duplicate rate: {("UNAVAILABLE" if dup["duplicate_rate"] is None else f"{dup["duplicate_rate"]:.1f}%")}')
+    duplicate_rate = "UNAVAILABLE" if dup["duplicate_rate"] is None else f'{dup["duplicate_rate"]:.1f}%'
+    st.caption(f'{dup["unique_events"]:,} unique event fingerprints from {dup["records"]:,} records • duplicate rate: {duplicate_rate}')
     st.markdown("### Intelligence Analytics — Evidence Grounded")
     data_class = "SIMULATED / DEMO DATA — NOT OPERATIONAL INTELLIGENCE" if st.session_state.demo_mode else "OBSERVED LOCAL EVIDENCE — OPERATIONAL DATA VIEW"
     st.caption(
