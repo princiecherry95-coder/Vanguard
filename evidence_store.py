@@ -10,6 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 import hashlib
+import os
 from datetime import datetime, timezone
 
 
@@ -28,6 +29,9 @@ CREATE TABLE IF NOT EXISTS evidence_history (id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS analysis_runs (id INTEGER PRIMARY KEY AUTOINCREMENT,evidence_sha256 TEXT NOT NULL,started_at TEXT NOT NULL,completed_at TEXT,status TEXT NOT NULL,records INTEGER NOT NULL DEFAULT 0,finding_groups INTEGER NOT NULL DEFAULT 0,risk_score REAL,error TEXT);
 CREATE INDEX IF NOT EXISTS idx_history_uploaded_at ON evidence_history(uploaded_at);
 CREATE INDEX IF NOT EXISTS idx_runs_evidence ON analysis_runs(evidence_sha256);
+CREATE TABLE IF NOT EXISTS evidence_uploads (id INTEGER PRIMARY KEY AUTOINCREMENT,evidence_sha256 TEXT NOT NULL,filename TEXT NOT NULL,format TEXT NOT NULL,size_bytes INTEGER NOT NULL,uploaded_at TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'LOCAL_UPLOAD');
+CREATE INDEX IF NOT EXISTS idx_uploads_digest ON evidence_uploads(evidence_sha256);
+CREATE INDEX IF NOT EXISTS idx_uploads_time ON evidence_uploads(uploaded_at);
 CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     evidence_sha256 TEXT NOT NULL,
@@ -88,7 +92,7 @@ class EvidenceStore:
 
     def archive_evidence(self, data: bytes, filename: str, format_name: str, uploaded_at: str | None = None) -> str:
         digest = hashlib.sha256(data).hexdigest()
-        root = self.path.parent / 'evidence_archive'
+        root = Path(os.environ.get('VANGUARD_EVIDENCE_ROOT', str(self.path.parent / 'evidence_archive'))).expanduser()
         root.mkdir(parents=True, exist_ok=True)
         safe_name = ''.join(c if c.isalnum() or c in '._-' else '_' for c in Path(filename).name)[:120] or 'evidence.log'
         stored = root / f'{digest[:16]}_{safe_name}'
@@ -96,11 +100,25 @@ class EvidenceStore:
             stored.write_bytes(bytes(data))
         conn = self._connect()
         try:
-            conn.execute('INSERT OR IGNORE INTO evidence_history(evidence_sha256,filename,format,size_bytes,stored_path,uploaded_at) VALUES(?,?,?,?,?,?)', (digest, Path(filename).name, format_name.upper(), len(data), str(stored), uploaded_at or datetime.now(timezone.utc).isoformat()))
+            upload_time = uploaded_at or datetime.now(timezone.utc).isoformat()
+            conn.execute('INSERT OR IGNORE INTO evidence_history(evidence_sha256,filename,format,size_bytes,stored_path,uploaded_at) VALUES(?,?,?,?,?,?)', (digest, Path(filename).name, format_name.upper(), len(data), str(stored), upload_time))
+            conn.execute('INSERT INTO evidence_uploads(evidence_sha256,filename,format,size_bytes,uploaded_at) VALUES(?,?,?,?,?)', (digest, Path(filename).name, format_name.upper(), len(data), upload_time))
             conn.commit()
         finally:
             conn.close()
         return digest
+
+    def upload_history(self, evidence_sha256: str | None = None, limit: int = 200) -> list[dict]:
+        conn = self._connect()
+        try:
+            if evidence_sha256:
+                rows = conn.execute("SELECT id,evidence_sha256,filename,format,size_bytes,uploaded_at,source FROM evidence_uploads WHERE evidence_sha256=? ORDER BY uploaded_at DESC LIMIT ?", (evidence_sha256, max(1,min(limit,1000)))).fetchall()
+            else:
+                rows = conn.execute("SELECT id,evidence_sha256,filename,format,size_bytes,uploaded_at,source FROM evidence_uploads ORDER BY uploaded_at DESC LIMIT ?", (max(1,min(limit,1000)),)).fetchall()
+            cols=["id","evidence_sha256","filename","format","size_bytes","uploaded_at","source"]
+            return [dict(zip(cols,row)) for row in rows]
+        finally:
+            conn.close()
 
     def history(self, limit: int = 100) -> list[dict]:
         conn = self._connect()
