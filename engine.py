@@ -425,7 +425,7 @@ def analyze_events(events: Iterable[NormalizedEvent]) -> dict[str, object]:
     analyst_alerts = build_analyst_queue(alerts, DETECTION_POLICY["correlation_window_seconds"])
     risk = analysis_risk(analyst_alerts)
     by_severity = {level: sum(a.severity == level for a in alerts) for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW")}
-        by_rule = {}
+    by_rule = {}
     for alert in alerts:
         by_rule[alert.rule_id] = by_rule.get(alert.rule_id, 0) + 1
     sources = sorted({e.source_ip for e in events if e.source_ip})
