@@ -343,8 +343,11 @@ with st.expander("Analyze security logs", expanded=True):
                             "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
                             "attack_type": event.action or event.event_type,
                         })
-                    pct = processed / total if total else 1.0
-                    progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
+                    if total:
+                        pct = min(0.99, processed / total)
+                        progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
+                    else:
+                        progress.progress(0.0, text=f"Analyzing evidence… {processed:,} records processed • complete evidence scan in progress")
                     live = pd.DataFrame(list(preview_rows))
                     with live_dashboard.container():
                         lm1, lm2, lm3, lm4 = st.columns(4)
