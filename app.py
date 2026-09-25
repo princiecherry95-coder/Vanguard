@@ -17,7 +17,7 @@ from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
 from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status
-from analytics import summary as analytics_summary, build_dataframe as analytics_dataframe, trend as analytics_trend
+from analytics import summary as analytics_summary, build_dataframe as analytics_dataframe, trend as analytics_trend, findings_dataframe, attack_matrix, rule_counts_dataframe
 from reporting import export_bundle
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
@@ -444,22 +444,36 @@ if st.session_state.logs:
         render_table([{"Source IP":k,"Events":v} for k,v in ar["top_sources"].items()])
         if st.session_state.analysis_result:
             st.json(st.session_state.analysis_result.get("risk_breakdown", {}))
+    st.markdown("**Analyst findings & detection analytics**")
+    fdf = findings_dataframe(st.session_state.analysis_result)
+    if not fdf.empty:
+        render_table(fdf.head(100))
+    matrix = attack_matrix(st.session_state.logs)
+    if not matrix.empty:
+        with st.expander("Attack × severity matrix", expanded=False):
+            render_table(matrix.reset_index().to_dict("records"))
+    rdf = rule_counts_dataframe(st.session_state.analysis_result)
+    if not rdf.empty:
+        with st.expander("Detection rule volume", expanded=False):
+            st.bar_chart(rdf.head(15).set_index("rule_id"))
+
     st.markdown("**Download / print reports**")
     report_source = st.session_state.telemetry_source or "Local evidence"
     bundle = export_bundle(st.session_state.logs, st.session_state.analysis_result, report_source)
-    rc = st.columns(5)
+    rc = st.columns(7)
     for col,key,label,mime in [
         (rc[0],"pdf","PDF","application/pdf"),
         (rc[1],"docx","Word","application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         (rc[2],"xlsx","Excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         (rc[3],"pptx","PowerPoint","application/vnd.openxmlformats-officedocument.presentationml.presentation"),
-        (rc[4],"json","JSON","application/json"),
+        (rc[4],"html","Print HTML","text/html"),
+        (rc[5],"csv","CSV","text/csv"),
+        (rc[6],"json","JSON","application/json"),
     ]:
         with col:
-            if st.download_button(f"⬇ {label}",data=bundle[key],file_name=f"vanguard_soc_report.{key}",mime=mime,key=f"report_{key}"):
+            if st.download_button(f"⬇ {label}", data=bundle[key], file_name=f"vanguard_soc_report.{key}", mime=mime, key=f"report_{key}"):
                 audit_event("SOC_REPORT_EXPORT", f"{report_source}:{key}", st.session_state.analysis_evidence_sha256 or "")
-else:
-    st.info("Analyze local evidence first. Analytics and reports will then use the real analyzed dataset.")
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)
