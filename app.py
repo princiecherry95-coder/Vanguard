@@ -175,23 +175,6 @@ def incident_report(log: dict) -> bytes:
 init_state()
 
 st.markdown('<div class="vh"><div class="vbrand"><div class="vmark">V</div><div class="vwordmark">VANGUARD</div><div class="vtag">SOC</div></div><div class="vsubtitle">SECURITY OPERATIONS, THREAT INTELLIGENCE, DETECTION &amp; INCIDENT RESPONSE PLATFORM</div><div class="vstatus"><span class="vdot">●</span> SECURED &nbsp;•&nbsp; AIR-GAPPED &nbsp;•&nbsp; OFFLINE &nbsp;•&nbsp; EVIDENCE PROCESSING ONLINE</div><div class="vline"></div><div class="vmeta">LOCAL SOC &nbsp;•&nbsp; DEFENSIVE ANALYTICS &nbsp;•&nbsp; EVIDENCE-FIRST OPERATIONS</div></div>', unsafe_allow_html=True)
-st.markdown('<div class="box"><b>ANALYST WORKSPACE</b> &nbsp; Command overview → evidence ingestion → detection → investigation → approved response → audit. The engine analyzes the complete evidence set; the UI only pages the display to stay responsive.</div>', unsafe_allow_html=True)
-
-c1, c2 = st.columns([5, 1])
-with c1:
-    st.caption(f"SOC intelligence telemetry • {html.escape(st.session_state.telemetry_source)} • No hard-coded operational events")
-with c2:
-    demo = st.toggle("⚡ Demo Mode", value=st.session_state.demo_mode)
-    if demo != st.session_state.demo_mode:
-        st.session_state.demo_mode = demo
-        if demo:
-            reset_demo()
-        else:
-            st.session_state.logs = []
-            st.session_state.quarantined_ips = set()
-            st.session_state.selected_event = None
-            st.session_state.telemetry_source = "No local evidence loaded"
-        st.rerun()
 st.markdown('<div class="panel"><div class="pt">Evidence Intake</div>', unsafe_allow_html=True)
 st.caption(f"Local evidence analysis • up to {MAX_UPLOAD_BYTES / (1024**3):.0f} GiB per file • sanitized, hashed and analyzed offline. No separate validation/staging step is required.")
 
@@ -671,6 +654,24 @@ if history_rows:
 else:
     st.info("No preserved evidence uploads yet. Analyze a local file to create the first immutable evidence-history entry.")
 st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="box"><b>ANALYST WORKSPACE</b> &nbsp; Command overview → evidence ingestion → detection → investigation → approved response → audit. The engine analyzes the complete evidence set; the UI only pages the display to stay responsive.</div>', unsafe_allow_html=True)
+
+c1, c2 = st.columns([5, 1])
+with c1:
+    st.caption(f"SOC intelligence telemetry • {html.escape(st.session_state.telemetry_source)} • No hard-coded operational events")
+with c2:
+    demo = st.toggle("⚡ Demo Mode", value=st.session_state.demo_mode)
+    if demo != st.session_state.demo_mode:
+        st.session_state.demo_mode = demo
+        if demo:
+            reset_demo()
+        else:
+            st.session_state.logs = []
+            st.session_state.quarantined_ips = set()
+            st.session_state.selected_event = None
+            st.session_state.telemetry_source = "No local evidence loaded"
+        st.rerun()
 
 st.markdown('<div class="panel"><div class="pt">Local SOC Analytics Engine</div>', unsafe_allow_html=True)
 st.caption("Offline ingestion • normalization • deterministic detection • correlation")
