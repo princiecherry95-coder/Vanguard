@@ -556,7 +556,7 @@ with st.expander("Analyze security logs", expanded=True):
                     "completed_at": bundle["completed_at"],
                 })
                 archive.record_analysis_snapshot(run_id, current_digest, bundle["analysis"].get("analyst_alerts", []))
-                 archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
+                archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
                 st.session_state.analysis_state = "COMPLETE"
                 st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence and preserved in Evidence History."
                 st.rerun()
@@ -618,13 +618,15 @@ if history_rows:
             bundle = analyze_bytes(data, meta["filename"], meta["format"])
             commit_dashboard_state(st, bundle, meta["filename"])
             store.record_analysis_snapshot(rid, selected["evidence_sha256"], bundle["analysis"].get("analyst_alerts", []))
-             store.finish_analysis_run(rid, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
+            store.finish_analysis_run(rid, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
             st.session_state.last_action = f"Historical evidence replay completed for {meta['filename']}."
             st.rerun()
         except Exception as exc:
-            if 'rid' in locals():
-                try: store.finish_analysis_run(rid, "FAILED", error=f"{type(exc).__name__}: {exc}")
-                except Exception: pass
+            if "rid" in locals():
+                try:
+                    store.finish_analysis_run(rid, "FAILED", error=f"{type(exc).__name__}: {exc}")
+                except Exception:
+                    pass
             st.error(f"Historical analysis failed safely: {type(exc).__name__}: {exc}")
 else:
     st.info("No preserved evidence uploads yet. Analyze a local file to create the first immutable evidence-history entry.")
@@ -754,14 +756,20 @@ oc3.metric("Incidents / Cases", len(incidents))
 oc4.metric("Telemetry Sources", len(telemetry))
 
 with st.expander("Asset Registry", expanded=False):
-    if assets: render_table(assets)
-    else: st.info("No assets registered. Import or enter authorized asset metadata.")
+    if assets:
+        render_table(assets)
+    else:
+        st.info("No assets registered. Import or enter authorized asset metadata.")
 with st.expander("Identity Registry", expanded=False):
-    if identities: render_table(identities)
-    else: st.info("No identities registered.")
+    if identities:
+        render_table(identities)
+    else:
+        st.info("No identities registered.")
 with st.expander("Incident & Case Register", expanded=True):
-    if incidents: render_table(incidents)
-    else: st.info("No incidents registered. Detection output remains evidence-based until a case is created.")
+    if incidents:
+        render_table(incidents)
+    else:
+        st.info("No incidents registered. Detection output remains evidence-based until a case is created.")
 with st.expander("Telemetry Health", expanded=True):
     if telemetry:
         render_table(telemetry)
