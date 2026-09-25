@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from engine import detection_policy
-from ingestion import ALLOWED_UPLOAD_TYPES, MAX_UPLOAD_BYTES
+from engine import analyze_events, correlate, detect, detect_behavior, detection_policy, parse_line
+from ingestion import ALLOWED_UPLOAD_TYPES, MAX_RECORDS, MAX_UPLOAD_BYTES, infer_upload_format, lines_from_upload, safe_uploaded_text
 from audit import audit_event, verify_audit_chain
 from distributed import EventBuffer
 from firewall import block_ip
@@ -312,3 +312,313 @@ if st.session_state.logs and st.session_state.analysis_result:
         xlsx_name = f"vanguard_analysis_{export_sha[:12]}.xlsx"
         st.download_button("Download Excel", data=xlsx_bytes, file_name=xlsx_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, on_click=_record_download, args=("xlsx", xlsx_name, xlsx_bytes))
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# RESTORED SOC OPERATIONS WORKSPACE
+# The upload/export workflow above remains the primary evidence intake path.
+# This workspace restores the operational information that existed in the
+# earlier Vanguard UI without replacing the newer evidence-first pipeline.
+# ---------------------------------------------------------------------------
+
+_df = dataframe()
+
+st.markdown('<div class="panel"><div class="pt">COMMAND STATUS & ANALYSIS OVERVIEW</div>', unsafe_allow_html=True)
+if st.session_state.analysis_summary:
+    summary = st.session_state.analysis_summary
+    status_label = "ANALYSIS COMPLETE" if st.session_state.analysis_state == "COMPLETE" else st.session_state.analysis_state
+    st.success(f"✓ {status_label} • {st.session_state.telemetry_source}")
+    a1, a2, a3, a4, a5 = st.columns(5)
+    a1.metric("Analyzed Records", len(st.session_state.logs))
+    a2.metric("Parsed Events", len(st.session_state.analysis_result.get("events", [])) if st.session_state.analysis_result else 0)
+    a3.metric("Alerts", len(st.session_state.analysis_result.get("alerts", [])) if st.session_state.analysis_result else 0)
+    a4.metric("Incidents", len(st.session_state.analysis_result.get("incidents", [])) if st.session_state.analysis_result else 0)
+    a5.metric("Risk Score", summary.get("risk_score", 0))
+    risk_breakdown = st.session_state.analysis_result.get("risk_breakdown", {}) if st.session_state.analysis_result else {}
+    if risk_breakdown:
+        st.caption(
+            f"Risk composition • alert points: {risk_breakdown.get('alert_points', 0)} • "
+            f"incident points: {risk_breakdown.get('incident_points', 0)}"
+        )
+    policy = detection_policy()
+    st.caption(
+        f"Detection policy • {policy['brute_force_failures']} failures / {policy['behavior_window_seconds']}s • "
+        f"{policy['scan_unique_destinations']} unique destinations / {policy['behavior_window_seconds']}s • "
+        f"correlation {policy['correlation_window_seconds']}s"
+    )
+    st.caption(
+        f"Parse coverage {summary.get('parse_coverage', 0):.1f}% • "
+        f"{summary.get('unique_sources', 0)} unique source(s) • "
+        f"{summary.get('unique_destinations', 0)} unique destination(s) • "
+        f"Completed {st.session_state.analysis_completed_at or 'now'}"
+    )
+    if st.session_state.analysis_evidence_sha256:
+        st.code(f"Evidence SHA-256: {st.session_state.analysis_evidence_sha256}", language="text")
+    rule_counts = summary.get("rule_counts", {})
+    if rule_counts:
+        st.dataframe(
+            pd.DataFrame(
+                [{"Detection Rule": k, "Matches": v} for k, v in sorted(rule_counts.items(), key=lambda x: (-x[1], x[0]))]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("Analysis completed. No configured detection rule matched the uploaded evidence.")
+else:
+    m1, m2, m3, m4 = st.columns(4)
+    critical = int((_df["severity"] == "CRITICAL").sum()) if not _df.empty and "severity" in _df else 0
+    high = int(_df["severity"].isin(["HIGH", "WARNING"]).sum()) if not _df.empty and "severity" in _df else 0
+    for col, value, label in zip(
+        [m1, m2, m3, m4],
+        [len(_df), critical, high, len(st.session_state.quarantined_ips)],
+        ["Total Log Entries", "Critical Anomalies", "High / Warning Alerts", "Quarantined Hosts"],
+    ):
+        with col:
+            st.metric(label, value)
+    st.info("No analyzed evidence is currently loaded. Upload a local security log above to populate the command view.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+left, right = st.columns([1.35, 1], gap="large")
+
+with left:
+    st.markdown('<div class="panel"><div class="pt">LIVE SECURITY LOG STREAM</div>', unsafe_allow_html=True)
+    if _df.empty:
+        st.info("No live telemetry loaded. Upload a JSON/JSONL/log/CSV file above.")
+    else:
+        filter_col, page_col = st.columns([3, 1])
+        with filter_col:
+            severity_filter = st.selectbox(
+                "Filter",
+                ["ALL", "CRITICAL", "HIGH", "MEDIUM", "WARNING", "LOW"],
+                label_visibility="collapsed",
+                key="restored_severity_filter",
+            )
+        with page_col:
+            page_size = st.selectbox("Page", [25, 50, 100], index=1, key="restored_page_size")
+        view = _df if severity_filter == "ALL" else _df[_df["severity"] == severity_filter]
+        total_pages = max(1, (len(view) + page_size - 1) // page_size)
+        page = min(int(st.session_state.get("log_page", 0)), total_pages - 1)
+        st.session_state.log_page = page
+        start = page * page_size
+        page_rows = view.iloc[start:start + page_size]
+        st.caption(f"Showing {start + 1 if len(view) else 0:,}–{min(start + page_size, len(view)):,} of {len(view):,} matching events")
+        for row in page_rows.to_dict("records"):
+            sev = str(row.get("severity", "LOW")).title()
+            state = " • QUARANTINED" if row.get("source_ip") in st.session_state.quarantined_ips else ""
+            st.markdown(
+                f'<div class="log {html.escape(sev)}">'
+                f'<div class="lh"><span>{html.escape(str(row.get("timestamp","")))} · '
+                f'<b>{html.escape(str(row.get("event_id",""))))}</b></span>'
+                f'<span class="sev">{html.escape(str(row.get("severity","LOW")))}{state}</span></div>'
+                f'<div><b>{html.escape(str(row.get("attack_type",""))))}</b> '
+                f'<span class="pill">{html.escape(str(row.get("source_ip","N/A")))}</span></div>'
+                f'<div class="lm">Target: {html.escape(str(row.get("target_endpoint","")))}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        nav1, nav2, nav3 = st.columns([1, 1, 2])
+        with nav1:
+            if st.button("← Previous", disabled=page <= 0, key="restored_prev"):
+                st.session_state.log_page = page - 1
+                st.rerun()
+        with nav2:
+            if st.button("Next →", disabled=page >= total_pages - 1, key="restored_next"):
+                st.session_state.log_page = page + 1
+                st.rerun()
+        with nav3:
+            st.caption(f"Page {page + 1} / {total_pages}")
+        options = _df["event_id"].astype(str).tolist() if "event_id" in _df else []
+        if options:
+            current_index = options.index(st.session_state.selected_event) if st.session_state.selected_event in options else 0
+            selected = st.selectbox("Inspect Event", options, index=current_index, key="restored_event_selector")
+            st.session_state.selected_event = selected
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with right:
+    log = selected_log()
+    st.markdown('<div class="panel"><div class="pt">TACTICAL AI INSPECTOR & PLAYBOOK</div>', unsafe_allow_html=True)
+    if log is None:
+        st.info("No telemetry available.")
+    else:
+        st.markdown(
+            f'<div class="box"><b>Event ID</b><br>{html.escape(str(log.get("event_id","")))}'
+            f'<br><br><b>Source IP</b><br>{html.escape(str(log.get("source_ip","N/A")))}'
+            f'<br><br><b>Target Endpoint</b><br>{html.escape(str(log.get("target_endpoint","")))}'
+            f'<br><br><b>Severity</b><br>{html.escape(str(log.get("severity","LOW")))}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("RAW PAYLOAD")
+        st.code(str(log.get("raw_payload", log.get("message", ""))), language="text")
+        st.markdown(
+            f'<div class="ai"><b>Plain-language AI threat translation</b><br><br>'
+            f'{html.escape(str(log.get("description","No analyst explanation is available for this event.")))}</div>',
+            unsafe_allow_html=True,
+        )
+        q1, q2 = st.columns(2)
+        with q1:
+            if st.button("🔒 Quarantine IP", type="primary", use_container_width=True, key="restored_quarantine"):
+                ip = str(log.get("source_ip", ""))
+                st.session_state.quarantined_ips.add(ip)
+                for item in st.session_state.logs:
+                    if item.get("source_ip") == ip:
+                        item["host_state"] = "QUARANTINED"
+                audit_event("QUARANTINE_SESSION", ip, log.get("raw_sha256", ""))
+                st.session_state.last_action = f"Local quarantine state applied to {ip}. No external firewall action performed."
+                st.rerun()
+        with q2:
+            report = incident_report(log)
+            report_name = f"vanguard_{log.get('event_id','incident')}.json"
+            if st.download_button("⬇ Export Incident Report", data=report, file_name=report_name, mime="application/json", use_container_width=True, key="restored_incident_report"):
+                st.session_state.incident_exports += 1
+                audit_event("INCIDENT_REPORT_EXPORT", str(log.get("event_id", "")))
+                st.session_state.last_action = f"Incident report exported for {log.get('event_id','event')}."
+        if str(log.get("source_ip", "")) in st.session_state.quarantined_ips:
+            st.markdown(f'<div class="q">● Host {html.escape(str(log.get("source_ip","")))} is quarantined in session state.</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">LOCAL SOC ANALYTICS ENGINE</div>', unsafe_allow_html=True)
+st.caption("Offline ingestion • normalization • deterministic detection • correlation • no external telemetry required.")
+with st.expander("Analyze local log lines", expanded=False):
+    sample = """2026-09-22T10:00:00+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:10+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:20+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:30+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:00:40+00:00 sshd: Failed password for user=admin from 10.10.1.7
+2026-09-22T10:01:00+00:00 10.10.1.7 GET /search?q=' OR '1'='1' HTTP/1.1"""
+    raw_lines = st.text_area("Paste local log sample", value=sample, height=180, key="restored_local_sample")
+    if st.button("Analyze Locally", type="primary", key="restored_local_analyze"):
+        try:
+            lines = [line for line in raw_lines.splitlines() if line.strip()]
+            events = [parse_line(line, "local-text") for line in lines]
+            alerts = []
+            for event in events:
+                alerts.extend(detect(event))
+            alerts.extend(detect_behavior(events))
+            incidents = correlate(alerts)
+            st.session_state.last_action = f"Locally analyzed {len(events)} events and generated {len(alerts)} alerts."
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Events Parsed", len(events))
+            m2.metric("Alerts", len(alerts))
+            m3.metric("Incidents", len(incidents))
+            for alert in alerts:
+                st.warning(f"{alert.severity} • {alert.rule_id} • {alert.title} — {alert.reason}")
+            if not alerts:
+                st.success("No configured detection rules matched the supplied local telemetry.")
+            for incident in incidents:
+                sources = ", ".join(sorted(x for x in incident["sources"] if x))
+                st.markdown(
+                    f'**{incident["incident_id"]}** • {incident["severity"]} • '
+                    f'{len(incident["alerts"])} correlated alert(s) • Sources: {sources}'
+                )
+        except Exception as exc:
+            st.error(f"Local analysis failed safely: {type(exc).__name__}: {exc}")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">SOC ANALYTICS & DETECTION INTELLIGENCE</div>', unsafe_allow_html=True)
+if st.session_state.analysis_result:
+    result = st.session_state.analysis_result
+    ac1, ac2, ac3 = st.columns(3)
+    ac1.metric("Unique Sources", len(result.get("unique_sources", [])))
+    ac2.metric("Unique Destinations", len(result.get("unique_destinations", [])))
+    ac3.metric("Parse Coverage", f'{result.get("parse_coverage", 0):.1f}%')
+    findings = findings_dataframe(st.session_state.logs)
+    if not findings.empty:
+        st.caption("Findings by severity and event type")
+        st.dataframe(findings, use_container_width=True, hide_index=True)
+    attack = attack_matrix(st.session_state.logs)
+    if not attack.empty:
+        st.caption("Attack / detection matrix")
+        st.dataframe(attack, use_container_width=True, hide_index=True)
+    rules = rule_counts_dataframe(result)
+    if not rules.empty:
+        st.caption("Detection rule counts")
+        st.dataframe(rules, use_container_width=True, hide_index=True)
+else:
+    st.info("Run an evidence analysis to populate analytics, findings and detection intelligence.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">LOCAL SOC CAPABILITY CENTER</div>', unsafe_allow_html=True)
+st.caption("Optional capabilities remain local-first and require explicit analyst action.")
+cap1, cap2, cap3 = st.columns(3)
+with cap1:
+    st.write("**Windows Event Logs**")
+    st.write("Available:", "YES" if windows_events_available() else "NO (non-Windows)")
+    st.write("Native Security/Application/System collection is available on Windows.")
+with cap2:
+    st.write("**Offline Threat Intel**")
+    ti = ThreatIntelCache()
+    ti_ip = st.text_input("Lookup local IOC IP", value="", key="restored_ti_ip")
+    if st.button("Lookup IOC", key="restored_ti_lookup"):
+        try:
+            st.json(ti.lookup_ip(ti_ip))
+        except ValueError as exc:
+            st.error(f"Invalid IP: {exc}")
+with cap3:
+    st.write("**Local AI / Analyst Guidance**")
+    ai_text = st.text_area("Alert context", value="Explain this security alert defensively.", key="restored_ai_context")
+    if st.button("Run Local AI", key="restored_local_ai"):
+        try:
+            st.info(local_ai_explain(ai_text))
+        except Exception as exc:
+            st.error(f"Local AI unavailable: {type(exc).__name__}")
+
+st.markdown("**Human-approved remediation**")
+rp = propose(log or {})
+st.json(rp)
+approve = st.checkbox("I approve the proposed remediation", key="restored_remediation_approval")
+if st.button("Execute Approved Remediation", disabled=not approve, key="restored_execute_remediation"):
+    result = execute_approved({**rp, "approved": True})
+    audit_event("REMEDIATION_EXECUTION", str(result))
+    st.json(result)
+
+st.markdown("**Firewall quarantine control**")
+fw_ip = st.text_input("Source IP to quarantine", value=(log or {}).get("source_ip", ""), key="restored_fw_ip")
+fw_apply = st.checkbox("Apply to local Windows firewall", value=False, key="restored_fw_apply")
+if st.button("Validate / Quarantine IP", key="restored_fw_button"):
+    try:
+        result = block_ip(fw_ip, apply=fw_apply)
+        audit_event("FIREWALL_ACTION", fw_ip)
+        st.json(result)
+    except ValueError as exc:
+        st.error(f"Rejected: {exc}")
+
+st.markdown("**Distributed local ingestion buffer**")
+buffer = EventBuffer()
+buffer.add({"source": "dashboard", "timestamp": datetime.now(timezone.utc).isoformat()})
+st.metric("Local buffer capacity", 50000)
+st.caption("Bounded in-memory buffering prevents unbounded ingestion growth.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">EVIDENCE OPERATIONS STATUS</div>', unsafe_allow_html=True)
+es = EvidenceStore()
+try:
+    history = es.list_analysis_runs(limit=10)
+except Exception:
+    history = []
+st.caption(
+    f"Evidence source: {st.session_state.telemetry_source} • "
+    f"Pipeline state: {st.session_state.analysis_state} • "
+    f"Stored analysis runs: {len(history)}"
+)
+if history:
+    history_rows = []
+    for item in history:
+        history_rows.append({
+            "Run ID": item.get("id"),
+            "Status": item.get("status"),
+            "Records": item.get("record_count"),
+            "Alerts": item.get("alert_count"),
+            "Risk": item.get("risk_score"),
+            "Started": item.get("started_at"),
+            "Completed": item.get("completed_at"),
+        })
+    st.dataframe(pd.DataFrame(history_rows), use_container_width=True, hide_index=True)
+else:
+    st.info("No persisted analysis history is available yet.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.caption(
+    f"Last action: {st.session_state.last_action} • Reports: {st.session_state.incident_exports} • "
+    "NETWORK DISCONNECTED • TELEMETRY LOCAL • EVIDENCE-FIRST"
+)
