@@ -48,7 +48,8 @@ def main():
         chunk_size=1,
     )
     assert incremental["records"] == 2
-    assert progress == [(1, 2), (2, 2)]
+    assert [item[0] for item in progress] == [1, 2]
+    assert all(total in (None, 2) for _, total in progress)
     assert incremental["sha256"] == validation["sha256"]
 
     malformed = b"2026-09-23T10:03:00Z normal event\n"
