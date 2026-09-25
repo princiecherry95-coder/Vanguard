@@ -27,8 +27,6 @@ from security_operations import SecurityOperationsStore, telemetry_status
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
-# Placeholder must exist before the Evidence Intake callback can publish live analysis updates.
-live_dashboard = st.empty()
 
 
 def _format_audit_timestamp(value):
@@ -247,8 +245,7 @@ else:
                         render_table(live.tail(MAX_UI_ROWS))
 
                 bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, fmt, on_chunk=publish_chunk)
-                if bundle["sha256"] != current_digest:
-                    raise ValueError("Evidence changed during analysis. Please analyze the current file again.")
+                if bundle["sha256"] != current_digest:                    raise ValueError("Evidence changed during analysis. Please analyze the current file again.")
                 progress.progress(1.0, text=f"Analysis complete • {bundle['records']:,} records")
                 commit_dashboard_state(st, bundle, source_name or uploaded.name)
                 st.session_state.pipeline_history.append({
@@ -277,11 +274,12 @@ else:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
+# Keep live analysis output below the upload controls and below the VANGUARD title.
+live_dashboard = st.empty()
 
 st.markdown('<div class="box" style="border-color:#00e5ff;"><b>PRIMARY WORKFLOW — EVIDENCE INTAKE</b> &nbsp; Upload → Preserve → Analyse → Investigate → Report. Start here for local security logs; accepted evidence is SHA-256 preserved before analysis.</div>', unsafe_allow_html=True)
 
 _df = dataframe()
-live_dashboard = st.empty()
 metrics = st.columns(4)
 critical = int((_df["severity"] == "CRITICAL").sum()) if not _df.empty else 0
 high = int((_df["severity"].isin(["HIGH", "WARNING"])).sum()) if not _df.empty else 0
@@ -497,8 +495,7 @@ if st.session_state.analysis_summary:
             ioc_df = pd.DataFrame(
                 [{"kind": item.kind, "count": 1} for item in iocs]
             ).groupby("kind").sum().sort_values("count", ascending=False)
-            st.markdown("**IOCs extracted from loaded evidence**")
-            st.bar_chart(ioc_df, use_container_width=True)
+            st.markdown("**IOCs extracted from loaded evidence**")            st.bar_chart(ioc_df, use_container_width=True)
             st.caption(
                 f"{len(iocs)} unique IOC(s) extracted from evidence. "
                 "These are OBSERVED artifacts, not externally validated threat intelligence."
@@ -747,8 +744,7 @@ if st.session_state.logs:
         trend_view = tr.set_index("period")[["records", "alerts", "critical"]]
         st.line_chart(trend_view)
 
-    st.markdown("**Top attack types**")
-    top_attack_df = pd.DataFrame(list(ar["top_attack_types"].items()), columns=["attack_type","count"])
+    st.markdown("**Top attack types**")    top_attack_df = pd.DataFrame(list(ar["top_attack_types"].items()), columns=["attack_type","count"])
     if not top_attack_df.empty:
         st.bar_chart(top_attack_df.set_index("attack_type"), y="count")
 
