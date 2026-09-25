@@ -151,66 +151,141 @@ def make_docx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report"
 def make_xlsx(rows, analysis, source) -> bytes:
     from openpyxl import Workbook
     from openpyxl.chart import BarChart, LineChart, Reference
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.page import PageMargins
 
-    ctx = report_context(rows, analysis, source); s = ctx["analytics"]
+    ctx = report_context(rows, analysis, source)
+    s = ctx["analytics"]
     wb = Workbook()
-    ws = wb.active; ws.title = "Executive Summary"
+    header_fill = PatternFill("solid", fgColor="17212B")
+    header_font = Font(bold=True, color="FFFFFF")
+    thin = Side(style="thin", color="B7C0C8")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def style_sheet(ws, landscape=False, repeat_header=True):
+        ws.freeze_panes = "A2"
+        ws.sheet_view.showGridLines = False
+        if ws.max_row:
+            for cell in ws[1]:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                cell.border = border
+            ws.auto_filter.ref = ws.dimensions
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.border = border
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        for col in range(1, ws.max_column + 1):
+            values = [str(ws.cell(row=r, column=col).value or "") for r in range(1, min(ws.max_row, 101) + 1)]
+            width = min(60, max(12, max((len(v) for v in values), default=12) + 2))
+            ws.column_dimensions[get_column_letter(col)].width = width
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.page_setup.orientation = "landscape" if landscape else "portrait"
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_margins = PageMargins(left=0.25, right=0.25, top=0.5, bottom=0.5, header=0.2, footer=0.2)
+        ws.print_title_rows = "1:1" if repeat_header else None
+        ws.oddFooter.center.text = "VANGUARD SOC • Page &P of &N"
+        ws.oddFooter.right.text = "Generated: " + str(ctx["generated_at"])
+
+    ws = wb.active
+    ws.title = "Executive Summary"
     metrics = [
         ("System", ctx["system"]), ("Classification", ctx["classification"]), ("Source", source),
-        ("Generated", ctx["generated_at"]), ("Observed window", f"{ctx.get('first_seen') or 'N/A'} → {ctx.get('last_seen') or 'N/A'}"), ("Data state", ctx["data_state"]), ("Evidence SHA-256", ctx.get("evidence_sha256", "")),
+        ("Generated", ctx["generated_at"]), ("Observed window", f"{ctx.get('first_seen') or 'N/A'} → {ctx.get('last_seen') or 'N/A'}"),
+        ("Data state", ctx["data_state"]), ("Evidence SHA-256", ctx.get("evidence_sha256", "")),
         ("Records", s["records"]), ("Unique sources", s["unique_sources"]), ("Unique targets", s["unique_targets"]),
         ("Alert rate %", s["alert_rate_pct"]), ("Critical rate %", s["critical_rate_pct"]),
         ("Parse coverage %", ctx["parse_coverage"]), ("Risk score", ctx["risk_score"]),
         ("Raw alerts", ctx["raw_alerts"]), ("Finding groups", ctx["finding_groups"]), ("Incidents", ctx["incidents"]),
     ]
-    for i, (k, v) in enumerate(metrics, 1): ws.cell(i, 1, k); ws.cell(i, 2, v)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
+    ws.append(["Metric", "Value"])
+    for k, v in metrics:
+        ws.append([k, v])
+    style_sheet(ws)
 
-    sev = wb.create_sheet("Severity"); sev.append(["Severity", "Count"])
-    for k, v in s["severity_counts"].items(): sev.append([k, v])
-    chart = BarChart(); chart.title = "Severity distribution"; chart.y_axis.title = "Events"
+    sev = wb.create_sheet("Severity")
+    sev.append(["Severity", "Count"])
+    for k, v in s["severity_counts"].items():
+        sev.append([k, v])
+    chart = BarChart()
+    chart.title = "Severity distribution"
+    chart.y_axis.title = "Events"
     chart.add_data(Reference(sev, min_col=2, min_row=1, max_row=1 + len(s["severity_counts"])), titles_from_data=True)
-    chart.set_categories(Reference(sev, min_col=1, min_row=2, max_row=1 + len(s["severity_counts"]))); sev.add_chart(chart, "D2")
+    chart.set_categories(Reference(sev, min_col=1, min_row=2, max_row=1 + len(s["severity_counts"])))
+    sev.add_chart(chart, "D2")
+    style_sheet(sev)
 
-    attacks = wb.create_sheet("Attack Types"); attacks.append(["Attack type", "Count"])
-    for k, v in s["top_attack_types"].items(): attacks.append([str(k), v])
+    attacks = wb.create_sheet("Attack Types")
+    attacks.append(["Attack type", "Count"])
+    for k, v in s["top_attack_types"].items():
+        attacks.append([str(k), v])
+    style_sheet(attacks)
 
-    sources = wb.create_sheet("Top Sources"); sources.append(["Source IP", "Events"])
-    for k, v in s["top_sources"].items(): sources.append([str(k), v])
+    sources = wb.create_sheet("Top Sources")
+    sources.append(["Source IP", "Events"])
+    for k, v in s["top_sources"].items():
+        sources.append([str(k), v])
+    style_sheet(sources)
 
     trend = __import__("analytics").trend(rows)
-    trws = wb.create_sheet("Trend"); trws.append(["Period", "Records", "Alerts", "Critical"])
-    for _, row in trend.iterrows(): trws.append([row["period"].to_pydatetime().replace(tzinfo=None), int(row["records"]), int(row["alerts"]), int(row["critical"])])
+    trws = wb.create_sheet("Trend")
+    trws.append(["Period", "Records", "Alerts", "Critical"])
+    for _, row in trend.iterrows():
+        period = row["period"].to_pydatetime().replace(tzinfo=None)
+        trws.append([period, int(row["records"]), int(row["alerts"]), int(row["critical"])])
     if trws.max_row > 1:
-        line = LineChart(); line.title = "Hourly evidence trend"; line.y_axis.title = "Count"
+        line = LineChart()
+        line.title = "Evidence and alert trend"
+        line.y_axis.title = "Count"
         line.add_data(Reference(trws, min_col=2, max_col=4, min_row=1, max_row=trws.max_row), titles_from_data=True)
-        line.set_categories(Reference(trws, min_col=1, min_row=2, max_row=trws.max_row)); trws.add_chart(line, "F2")
+        line.set_categories(Reference(trws, min_col=1, min_row=2, max_row=trws.max_row))
+        trws.add_chart(line, "F2")
+    style_sheet(trws, landscape=True)
 
     findings = __import__("analytics").findings_dataframe(analysis)
     fws = wb.create_sheet("Analyst Findings")
     if not findings.empty:
         fws.append(list(findings.columns))
-        for row in findings.itertuples(index=False): fws.append(list(row))
+        for row in findings.itertuples(index=False):
+            fws.append(list(row))
     else:
         fws.append(["No analyst findings"])
+    style_sheet(fws, landscape=True)
 
+    # Preserve every parsed field for every evidence record. No 500-row truncation and no
+    # fixed-column projection: the workbook remains a lossless tabular export of the
+    # in-memory evidence records.
     ev = wb.create_sheet("Evidence")
-    cols = ["event_id", "timestamp", "severity", "source_ip", "target_endpoint", "attack_type", "description", "raw_sha256"]
-    ev.append(cols)
-    for r in rows: ev.append([r.get(c, "") for c in cols])
-    for sheet in wb.worksheets:
-        sheet.freeze_panes = "A2"
-        for cell in sheet[1]:
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill("solid", fgColor="1B2633")
-        for col in range(1, sheet.max_column + 1):
-            width = max((len(str(sheet.cell(row=row, column=col).value or "")) for row in range(1, min(sheet.max_row, 100) + 1)), default=12)
-            sheet.column_dimensions[get_column_letter(col)].width = min(55, max(12, width + 2))
-    out = BytesIO(); wb.save(out); return out.getvalue()
+    all_columns = []
+    seen = set()
+    for record in rows:
+        for key in record:
+            key = str(key)
+            if key not in seen:
+                seen.add(key)
+                all_columns.append(key)
+    if all_columns:
+        ev.append(all_columns)
+        for record in rows:
+            ev.append([record.get(column, "") for column in all_columns])
+    else:
+        ev.append(["No evidence records"])
+    style_sheet(ev, landscape=True)
+    ev.auto_filter.ref = ev.dimensions
+    ev.print_area = ev.dimensions
 
+    # Make the summary and every data sheet printable on A4 without changing source data.
+    for sheet in wb.worksheets:
+        if sheet.title != "Evidence":
+            sheet.print_area = sheet.dimensions
+    wb.calculation.fullCalcOnLoad = True
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
 
 def make_pptx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report") -> bytes:
     from pptx import Presentation
