@@ -44,6 +44,33 @@ CSS = """
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
+MAX_UI_ROWS = 200
+LOG_PAGE_SIZE = 50
+
+def render_table(rows, max_rows: int = MAX_UI_ROWS) -> None:
+    """Render bounded evidence tables without Streamlit's PyArrow dataframe path."""
+    if rows is None:
+        st.info("No data available.")
+        return
+    if hasattr(rows, "to_dict"):
+        rows = rows.to_dict("records")
+    rows = list(rows)[-max_rows:]
+    if not rows:
+        st.info("No data available.")
+        return
+    columns = list(rows[0].keys())
+    header = "".join(f"<th>{html.escape(str(col))}</th>" for col in columns)
+    body = []
+    for row in rows:
+        cells = "".join(f"<td>{html.escape(str(row.get(col, '')))}</td>" for col in columns)
+        body.append(f"<tr>{cells}</tr>")
+    st.markdown(
+        '<div style="overflow:auto;max-height:520px;border:1px solid #243444;border-radius:10px;">'
+        '<table style="width:100%;border-collapse:collapse;font-size:.78rem;">'
+        f'<thead><tr>{header}</tr></thead><tbody>{"".join(body)}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
+
 
 def init_state() -> None:
     defaults = {
@@ -66,6 +93,7 @@ def init_state() -> None:
         "pipeline_history": [],
         "event_buffer": EventBuffer(),
         "dashboard_drilldown": None,
+        "log_page": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -106,6 +134,7 @@ def incident_report(log: dict) -> bytes:
 init_state()
 
 st.markdown('<div class="vh"><div class="vk">🛡️ CISMIC 2026 • LOCAL SOC • DEFENSIVE ANALYTICS</div><div class="vt">VANGUARD-SIEM // SOC INTELLIGENCE CENTER</div><div class="vs">● Status: SECURED • AIR-GAPPED • OFFLINE • EVIDENCE PROCESSING ONLINE</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="box"><b>ANALYST WORKSPACE</b> &nbsp; Command overview → evidence ingestion → detection → investigation → approved response → audit. The engine analyzes the complete evidence set; the UI only pages the display to stay responsive.</div>', unsafe_allow_html=True)
 
 c1, c2 = st.columns([5, 1])
 with c1:
@@ -161,11 +190,7 @@ if st.session_state.get("dashboard_drilldown"):
         st.info("No records currently match this dashboard view.")
     else:
         drill = drill.reset_index(drop=True)
-        st.dataframe(
-            drill[["event_id", "timestamp", "severity", "source_ip", "target_endpoint", "attack_type"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+        render_table(drill[["event_id", "timestamp", "severity", "source_ip", "target_endpoint", "attack_type"]])
         drill_options = drill["event_id"].tolist()
         drill_current = drill_options.index(st.session_state.selected_event) if st.session_state.selected_event in drill_options else 0
         drill_event = st.selectbox("Open event from this dashboard view", drill_options, index=drill_current, key=f"drill_select_{target}")
@@ -211,16 +236,31 @@ with left:
     view = _df if severity_filter == "ALL" else _df[_df["severity"] == severity_filter]
     if view.empty:
         st.info("No live telemetry loaded. Upload a JSON/JSONL/log file below." if _df.empty else "No events match the current filter.")
-    for row in view.to_dict("records"):
-        sev = row["severity"].title()
-        state = " • QUARANTINED" if row["source_ip"] in st.session_state.quarantined_ips else ""
-        st.markdown(f'<div class="log {sev}"><div class="lh"><span>{html.escape(row["timestamp"])} · <b>{html.escape(row["event_id"])}</b></span><span class="sev">{html.escape(row["severity"])}{state}</span></div><div><b>{html.escape(row["attack_type"])}</b> <span class="pill">{html.escape(row["source_ip"])}</span></div><div class="lm">Target: {html.escape(row["target_endpoint"])}</div></div>', unsafe_allow_html=True)
-        if st.button(f"Inspect {row['event_id']}", key=f"inspect_{row['event_id']}", use_container_width=True):
-            st.session_state.selected_event = row["event_id"]
-            st.session_state.last_action = f"Event inspector opened for {row['event_id']}."
-            st.rerun()
-    if not _df.empty:
-        options = _df["event_id"].tolist()
+    else:
+        total_pages = max(1, (len(view) + LOG_PAGE_SIZE - 1) // LOG_PAGE_SIZE)
+        st.session_state.log_page = min(st.session_state.log_page, total_pages - 1)
+        p1, p2, p3 = st.columns([1, 1, 2])
+        with p1:
+            if st.button("← Newer", disabled=st.session_state.log_page <= 0, use_container_width=True):
+                st.session_state.log_page -= 1
+                st.rerun()
+        with p2:
+            if st.button("Older →", disabled=st.session_state.log_page >= total_pages - 1, use_container_width=True):
+                st.session_state.log_page += 1
+                st.rerun()
+        with p3:
+            st.caption(f"Page {st.session_state.log_page + 1}/{total_pages} • {len(view):,} matching records • all records retained for analysis")
+        start_row = st.session_state.log_page * LOG_PAGE_SIZE
+        page_rows = view.iloc[start_row:start_row + LOG_PAGE_SIZE].to_dict("records")
+        for row in page_rows:
+            sev = row["severity"].title()
+            state = " • QUARANTINED" if row["source_ip"] in st.session_state.quarantined_ips else ""
+            st.markdown(f'<div class="log {sev}"><div class="lh"><span>{html.escape(row["timestamp"])} · <b>{html.escape(row["event_id"])}</b></span><span class="sev">{html.escape(row["severity"])}{state}</span></div><div><b>{html.escape(row["attack_type"])}</b> <span class="pill">{html.escape(row["source_ip"])}</span></div><div class="lm">Target: {html.escape(row["target_endpoint"])}</div></div>', unsafe_allow_html=True)
+            if st.button(f"Inspect {row['event_id']}", key=f"inspect_{row['event_id']}", use_container_width=True):
+                st.session_state.selected_event = row["event_id"]
+                st.session_state.last_action = f"Event inspector opened for {row['event_id']}."
+                st.rerun()
+        options = view["event_id"].tolist()
         current_index = options.index(st.session_state.selected_event) if st.session_state.selected_event in options else 0
         selected = st.selectbox("Inspect Event", options, index=current_index)
         st.session_state.selected_event = selected
@@ -290,7 +330,8 @@ with st.expander("Analyze security logs", expanded=True):
                 progress = st.progress(0, text="Starting evidence analysis…")
                 live_dashboard.empty()
                 preview = st.empty()
-                preview_rows = []
+                from collections import deque
+                preview_rows = deque(maxlen=MAX_UI_ROWS)
 
                 def publish_chunk(events, processed, total):
                     for event in events:
@@ -304,7 +345,7 @@ with st.expander("Analyze security logs", expanded=True):
                         })
                     pct = processed / total if total else 1.0
                     progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
-                    live = pd.DataFrame(preview_rows)
+                    live = pd.DataFrame(list(preview_rows))
                     with live_dashboard.container():
                         lm1, lm2, lm3, lm4 = st.columns(4)
                         lm1.metric("Analyzed Records", processed)
@@ -312,8 +353,7 @@ with st.expander("Analyze security logs", expanded=True):
                         lm3.metric("High / Warning", int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0)
                         lm4.metric("Latest Event", preview_rows[-1]["event_id"] if preview_rows else "-")
                         st.caption("LIVE ANALYSIS FEED • records are being normalized while the evidence is analyzed")
-                        render_table(live.tail(100))
-                    render_table(live.tail(MAX_UI_ROWS))
+                        render_table(live.tail(MAX_UI_ROWS))
 
                 bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, fmt, on_chunk=publish_chunk)
                 if bundle["sha256"] != current_digest:
