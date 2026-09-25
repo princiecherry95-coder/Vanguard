@@ -555,7 +555,8 @@ with st.expander("Analyze security logs", expanded=True):
                     "records": bundle["records"],
                     "completed_at": bundle["completed_at"],
                 })
-                archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
+                archive.record_analysis_snapshot(run_id, current_digest, bundle["analysis"].get("analyst_alerts", []))
+                 archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
                 st.session_state.analysis_state = "COMPLETE"
                 st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence and preserved in Evidence History."
                 st.rerun()
@@ -591,16 +592,33 @@ if history_rows:
     selected_idx = st.selectbox("Select preserved evidence", range(len(choices)), format_func=lambda i: choices[i], key="history_select")
     selected = history_rows[selected_idx]
     runs = store.analysis_history(selected["evidence_sha256"], limit=20)
+    st.markdown(f"**Analysis / scan count: {len(runs)}**")
     if runs:
-        st.markdown("**Analysis runs for selected evidence**")
-        render_table([{k: r[k] for k in ["id","started_at","completed_at","status","records","finding_groups","risk_score","error"]} for r in runs])
+        run_rows = []
+        for run in runs:
+            variation = store.analysis_variation(selected["evidence_sha256"], run["id"]) if run["status"] == "COMPLETE" else {"total_variations": 0, "added_count": 0, "removed_count": 0, "changed_count": 0}
+            run_rows.append({**{k: run[k] for k in ["id","started_at","completed_at","status","records","finding_groups","risk_score","error"]}, "variations": variation["total_variations"], "added": variation["added_count"], "removed": variation["removed_count"], "changed": variation["changed_count"]})
+        render_table(run_rows)
+        latest_complete = next((r for r in runs if r["status"] == "COMPLETE"), None)
+        if latest_complete:
+            variation = store.analysis_variation(selected["evidence_sha256"], latest_complete["id"])
+            st.markdown(f"**Latest scan variation vs run #{variation['baseline_run_id'] or 'baseline'}** • {variation['total_variations']} variation(s) — {variation['added_count']} added, {variation['removed_count']} removed, {variation['changed_count']} changed.")
+            for label, key in [("Added findings","added"),("Removed findings","removed"),("Changed findings","changed")]:
+                items = variation[key]
+                if items:
+                    with st.expander(f"{label} ({len(items)})", expanded=(key == "changed")):
+                        if key == "changed":
+                            render_table([{"finding": x["finding_key"], "rule": x["rule_id"], "reason": x["reason"], "differences": str(x["differences"])} for x in items])
+                        else:
+                            render_table([{"finding": x["finding_key"], "rule": x["rule_id"], "severity": x["severity"], "occurrences": x["occurrence_count"], "reason": x["reason"]} for x in items])
     if st.button("Analyze Selected Historical Evidence", type="primary", use_container_width=True):
         try:
             data, meta = store.load_evidence(selected["evidence_sha256"])
             rid = store.start_analysis_run(selected["evidence_sha256"])
             bundle = analyze_bytes(data, meta["filename"], meta["format"])
             commit_dashboard_state(st, bundle, meta["filename"])
-            store.finish_analysis_run(rid, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
+            store.record_analysis_snapshot(rid, selected["evidence_sha256"], bundle["analysis"].get("analyst_alerts", []))
+             store.finish_analysis_run(rid, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
             st.session_state.last_action = f"Historical evidence replay completed for {meta['filename']}."
             st.rerun()
         except Exception as exc:
