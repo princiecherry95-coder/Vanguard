@@ -1,62 +1,94 @@
 # Vanguard-SIEM
 
-**Tactical AI-Augmented Log Intelligence Console** — a standalone Streamlit MVP for an isolated, air-gapped hackathon environment.
+**Offline-first SOC Log Intelligence & Threat Detection Platform** for controlled defensive analytics.
 
-## Features
-- Dark enterprise SOC-style single-page console
-- Offline embedded demo telemetry
-- Pandas-backed log manipulation and filtering
-- Critical / warning / low severity indicators
-- Tactical event inspector with raw payload and plain-language defensive translation
-- Session-state IP quarantine simulation
-- JSON incident-report export
-- Local evidence workflow: **UPLOAD → ANALYZE → COMPLETE**
-- SHA-256 evidence integrity verification
-- No CDN, remote API, telemetry, or live-internet runtime dependency
+Vanguard is designed for isolated environments where security telemetry must be ingested, normalized, detected, correlated and investigated locally without cloud runtime dependencies.
 
-## Run locally on macOS
+## Current architecture
 
-Use **Python 3.11** for the supported, repeatable local environment.
+RAW EVIDENCE → VALIDATION → NORMALIZATION → DETECTION → FINDINGS → GROUPING → CORRELATION → INCIDENTS → RESPONSE → AUDIT
 
-```bash
-git clone https://github.com/princiecherry95-coder/Vanguard.git
-cd Vanguard
+### Analyst workspaces
+
+COMMAND → TRIAGE → INVESTIGATE → EVIDENCE → DETECTIONS → RESPONSE → AUDIT → SYSTEM HEALTH
+
+## Core capabilities
+
+- Heterogeneous local log ingestion: text/syslog, CSV, JSON, JSONL and XML.
+- Suricata EVE JSON normalization and deterministic signature detection.
+- Authentication, web attack, privilege, scanning and behavioral detections.
+- Versioned detection metadata with severity, confidence, category, MITRE ATT&CK mapping and analyst guidance.
+- Evidence-preserving finding grouping to reduce alert fatigue.
+- Full evidence analysis with bounded UI pagination.
+- Local SQLite evidence/finding metadata store.
+- SHA-256 evidence provenance.
+- Append-only hash-chained audit records with verification.
+- Human-approved response and Windows firewall controls.
+- Optional local-only AI adapter; no Internet AI dependency.
+- Offline local threat-intelligence cache.
+- Cross-platform CI, pytest, Ruff, Bandit, dependency audit and CodeQL.
+
+## Security model
+
+- No cloud LLM or live external threat-intelligence dependency at runtime.
+- Uploaded content is treated as untrusted data and is never executed.
+- Credentials, bearer tokens and API-key-like values are redacted before display/audit storage.
+- Disruptive response requires explicit analyst approval.
+- Raw evidence is not published in the repository; test fixtures should be synthetic or sanitized.
+- Local audit integrity is verified using a previous-record hash chain.
+
+## Local setup
+
+Use Python 3.11–3.14.
+
+### Windows
+
+~~~text
+py -3.14 -m venv .venv
+.venv\\Scripts\\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+~~~
+
+### macOS/Linux
+
+~~~text
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+~~~
 
+## Verification
+
+~~~text
+python -m pytest -q
 python smoke_test.py
-python test_engine.py
-python test_ingestion.py
-python test_pipeline.py
-python test_audit.py
-python test_security.py
 python runtime_smoke_test.py
+~~~
 
-streamlit run app.py
-```
+For a production-style security check:
 
-Open the local address shown by Streamlit, normally `http://localhost:8501`.
+~~~text
+python -m ruff check .
+python -m bandit -q -r engine.py ingestion.py audit.py evidence_store.py detection_registry.py risk.py triage.py soc_pipeline.py -lll
+python -m pip_audit -r requirements.txt
+~~~
 
-### macOS notes
-- Core analysis is platform-neutral.
-- Windows Event Log collection is detected at runtime and disabled on macOS.
-- Firewall enforcement is Windows-only; non-Windows returns `UNSUPPORTED_PLATFORM` safely.
-- Local AI is disabled by default and does not require Internet access.
-- Evidence processing, hashing, parsing, detection, correlation and audit writing remain local.
+## Offline installation
 
-## Air-gapped installation
-Place approved Python wheels in a local `wheelhouse/` directory and install:
-```bash
+Place approved wheels in a controlled local wheelhouse:
+
+~~~text
 python -m pip install --no-index --find-links ./wheelhouse -r requirements.txt
-```
+~~~
 
-## Security boundary
-Quarantine actions require explicit analyst approval. Windows firewall changes are platform-gated; non-Windows systems do not execute Windows firewall commands. Incident reports are generated locally.
+## Repository hygiene
 
-## CI
-CI tests Ubuntu, macOS and Windows with Python 3.11. The runtime smoke test imports the runtime modules, performs deterministic local analysis, starts Streamlit and checks its local health endpoint.
+Local virtual environments, raw evidence, audit databases and runtime caches are intentionally ignored by Git. The repository contains source, sanitized fixtures, tests, documentation and deployment configuration.
 
-## Repository
-`princiecherry95-coder/Vanguard`
+## Version
+
+Current architecture baseline: **0.4.0**
