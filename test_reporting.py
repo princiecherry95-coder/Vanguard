@@ -51,9 +51,9 @@ def test_xlsx_preserves_all_evidence_fields_and_records_and_is_print_ready():
     assert ws["C2"].value == "KEEP-ME"
     assert ws["E3"].value == "SECOND"
     assert ws.freeze_panes == "A2"
-    assert ws.auto_filter.ref == ws.dimensions
+    assert ws.auto_filter.ref == ws.dimensions.replace("Evidence", "Evidence")
     assert str(ws.page_setup.paperSize) == str(ws.PAPERSIZE_A4)
     assert ws.page_setup.orientation == "landscape"
     assert ws.page_setup.fitToWidth == 1
-    assert ws.print_area == ws.dimensions
+    assert ws.print_area == "'Evidence'!$A$1:$E$3"
     assert ws.oddFooter.center.text == "VANGUARD SOC • Page &P of &N"
