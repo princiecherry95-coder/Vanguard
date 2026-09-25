@@ -436,10 +436,12 @@ if st.session_state.logs:
     st.bar_chart(sevdf.set_index("severity"))
     st.markdown("**Top attack types**")
     top_attack_df = pd.DataFrame(list(ar["top_attack_types"].items()), columns=["attack_type","count"])
-    if not top_attack_df.empty: st.bar_chart(top_attack_df.set_index("attack_type"))
+    if not top_attack_df.empty:
+        st.bar_chart(top_attack_df.set_index("attack_type"))
     st.markdown("**Hourly trend**")
     tr = analytics_trend(st.session_state.logs)
-    if not tr.empty: st.line_chart(tr.set_index("period")[["records","alerts"]])
+    if not tr.empty:
+        st.line_chart(tr.set_index("period")[["records","alerts"]])
     with st.expander("Top sources / analytical detail", expanded=False):
         render_table([{"Source IP":k,"Events":v} for k,v in ar["top_sources"].items()])
         if st.session_state.analysis_result:
