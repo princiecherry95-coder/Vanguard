@@ -420,10 +420,19 @@ with st.expander("Analyze local log lines", expanded=False):
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>
-<div class="box">Offline runtime • local evidence store • append-only audit verification • no external telemetry.</div>
-<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)
-st.caption("Optional capabilities remain local-first and require explicit configuration or analyst approval.")
+st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)
+h1, h2, h3 = st.columns(3)
+with h1:
+    st.metric("Evidence Store", "READY" if st.session_state.get("evidence_store_summary") else "IDLE")
+with h2:
+    audit_status = verify_audit_chain()
+    st.metric("Audit Chain", "PASS" if audit_status["valid"] else "FAIL")
+with h3:
+    st.metric("Audit Records", int(audit_status.get("records", 0)))
+st.caption("Offline runtime • local evidence store • append-only audit verification • no external telemetry.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)st.caption("Optional capabilities remain local-first and require explicit configuration or analyst approval.")
 cap1, cap2, cap3 = st.columns(3)
 with cap1:
     st.write("**Windows Event Logs**")
