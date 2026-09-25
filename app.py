@@ -409,9 +409,9 @@ with left:
             st.markdown(
                 f'<div class="log {html.escape(sev)}">'
                 f'<div class="lh"><span>{html.escape(str(row.get("timestamp","")))} · '
-                f'<b>{html.escape(str(row.get("event_id",""))))}</b></span>'
+                f'<b>{html.escape(str(row.get("event_id","")))}</b></span>'
                 f'<span class="sev">{html.escape(str(row.get("severity","LOW")))}{state}</span></div>'
-                f'<div><b>{html.escape(str(row.get("attack_type",""))))}</b> '
+                f'<div><b>{html.escape(str(row.get("attack_type","")))}</b> '
                 f'<span class="pill">{html.escape(str(row.get("source_ip","N/A")))}</span></div>'
                 f'<div class="lm">Target: {html.escape(str(row.get("target_endpoint","")))}</div>'
                 f'</div>',
