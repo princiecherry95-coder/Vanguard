@@ -60,12 +60,13 @@ def audit_event(action: str, target: str = "", evidence_sha256: str = "") -> str
 
 
 def verify_audit_chain(path: str | Path | None = None) -> dict[str, object]:
-    """Verify record hashes and previous-hash links without changing the trail."""
+    """Verify current hash-chain records and accept legacy pre-chain records."""
     target = Path(path) if path else AUDIT_PATH
     if not target.exists():
         return {"valid": True, "records": 0, "error": None}
     previous = ""
     records = 0
+    legacy_records = 0
     with target.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
@@ -73,14 +74,17 @@ def verify_audit_chain(path: str | Path | None = None) -> dict[str, object]:
             try:
                 record = json.loads(line)
                 stored = record.pop("record_sha256")
-                if record.get("previous_hash", "") != previous:
-                    return {"valid": False, "records": records, "error": f"previous_hash mismatch at line {line_number}"}
+                legacy = "previous_hash" not in record
+                if legacy:
+                    legacy_records += 1
+                elif record.get("previous_hash", "") != previous:
+                    return {"valid": False, "records": records, "legacy_records": legacy_records, "error": f"previous_hash mismatch at line {line_number}"}
                 canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
                 calculated = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
                 if calculated != stored:
-                    return {"valid": False, "records": records, "error": f"record hash mismatch at line {line_number}"}
+                    return {"valid": False, "records": records, "legacy_records": legacy_records, "error": f"record hash mismatch at line {line_number}"}
                 previous = stored
                 records += 1
             except (ValueError, KeyError, TypeError):
-                return {"valid": False, "records": records, "error": f"invalid record at line {line_number}"}
-    return {"valid": True, "records": records, "error": None, "head": previous}
+                return {"valid": False, "records": records, "legacy_records": legacy_records, "error": f"invalid record at line {line_number}"}
+    return {"valid": True, "records": records, "legacy_records": legacy_records, "error": None, "head": previous}
