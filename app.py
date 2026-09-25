@@ -20,6 +20,7 @@ from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashbo
 from analytics import summary as analytics_summary, trend as analytics_trend, findings_dataframe, attack_matrix, rule_counts_dataframe
 from reporting import export_bundle
 from intelligence_fusion import extract_iocs
+from soc_context import build_soc_context
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -224,6 +225,64 @@ if st.session_state.analysis_summary:
     # Evidence-grounded analytics: every figure below is derived only from the
     # currently loaded evidence set. Empty evidence produces no synthetic chart.
     evidence_metrics = analytics_summary(st.session_state.logs)
+    soc_context = build_soc_context(st.session_state.logs, st.session_state.analysis_result)
+    st.markdown("### SOC Operations Picture")
+    st.caption("Evidence-derived operational context. Missing telemetry is shown as unavailable; no synthetic health or coverage values are generated.")
+
+    sw1, sw2, sw3, sw4 = st.columns(4)
+    window = soc_context["window"]
+    quality = soc_context["quality"]
+    dup = soc_context["duplicates"]
+    baseline = soc_context["baseline"]
+    sw1.metric("Observed Window", "AVAILABLE" if window["first_seen"] else "UNAVAILABLE")
+    sw2.metric("Evidence Quality", f'{quality["timestamp_quality"]:.1f}%' if quality["timestamp_quality"] is not None else "UNAVAILABLE")
+    sw3.metric("Duplicate Records", dup["duplicate_records"])
+    sw4.metric("Baseline", baseline["state"].replace("_", " "))
+
+    q1, q2 = st.columns(2)
+    with q1:
+        st.markdown("**Evidence Quality / Detection Context**")
+        coverage_rows = [{"Dimension": k.replace("_", " ").title(), "Observed Coverage": ("UNAVAILABLE" if v is None else f"{v:.1f}%")} for k, v in quality["field_coverage"].items()]
+        render_table(coverage_rows)
+        if quality["future_timestamps"]:
+            st.warning(f'{quality["future_timestamps"]:,} timestamp(s) are in the future relative to the analysis runtime.')
+    with q2:
+        st.markdown("**Telemetry Sources**")
+        render_table(soc_context["sources"][:12])
+        if window["first_seen"] and window["last_seen"]:
+            st.caption(f'Observed window: {window["first_seen"]} → {window["last_seen"]}')
+        else:
+            st.caption("Observed window: unavailable because no valid timestamps were found.")
+
+    t1, t2 = st.columns(2)
+    with t1:
+        st.markdown("**Observed Event Timeline**")
+        timeline = soc_context["timeline"]
+        if timeline:
+            render_table(timeline[-30:])
+        else:
+            st.info("No valid timestamped events are available for timeline reconstruction.")
+    with t2:
+        st.markdown("**Activity Baseline**")
+        if baseline["state"] == "OBSERVED_BASELINE":
+            st.metric("Median Events / Hour", baseline["median"])
+            st.metric("Peak Events / Hour", baseline["peak"])
+            st.caption(f'Peak period: {baseline["peak_period"]} • deviation from observed median: {baseline["peak_deviation_percent"]}%')
+        else:
+            st.info(f'Baseline not calculated: {baseline["buckets"]} observed time bucket(s). At least 3 are required.')
+
+    st.markdown("**Source / Asset Context**")
+    st.caption("Sources are derived from the loaded evidence. Asset identity, ownership and criticality remain unavailable unless the source logs provide them or an asset inventory is configured.")
+    st.markdown("**Detection Coverage**")
+    coverage = soc_context["coverage"]["observed_category_rates"]
+    covdf = pd.DataFrame([{"category": k.replace("_", " ").title(), "observed_rate": v} for k, v in coverage.items() if v is not None])
+    if not covdf.empty:
+        st.bar_chart(covdf.set_index("category"))
+    else:
+        st.info("Detection coverage is unavailable because the evidence set is empty.")
+
+    st.markdown("**Data Integrity**")
+    st.caption(f'{dup["unique_events"]:,} unique event fingerprints from {dup["records"]:,} records • duplicate rate: {("UNAVAILABLE" if dup["duplicate_rate"] is None else f"{dup["duplicate_rate"]:.1f}%")}')
     st.markdown("### Intelligence Analytics — Evidence Grounded")
     data_class = "SIMULATED / DEMO DATA — NOT OPERATIONAL INTELLIGENCE" if st.session_state.demo_mode else "OBSERVED LOCAL EVIDENCE — OPERATIONAL DATA VIEW"
     st.caption(
