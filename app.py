@@ -17,6 +17,8 @@ from threat_intel import ThreatIntelCache
 from windows_events import available as windows_events_available
 from local_ai import explain as local_ai_explain
 from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status
+from analytics import summary as analytics_summary, build_dataframe as analytics_dataframe, trend as analytics_trend
+from reporting import export_bundle
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -418,6 +420,46 @@ with st.expander("Analyze local log lines", expanded=False):
             st.error(f"Local analysis rejected safely: {exc}")
 
 
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">SOC Analytics & Report Center</div>', unsafe_allow_html=True)
+st.caption("Offline data analytics over the currently analyzed evidence. Reports are generated locally; no data leaves this machine.")
+if st.session_state.logs:
+    ar = analytics_summary(st.session_state.logs)
+    ac1, ac2, ac3, ac4 = st.columns(4)
+    ac1.metric("Records", ar["records"])
+    ac2.metric("Unique Sources", ar["unique_sources"])
+    ac3.metric("Unique Targets", ar["unique_targets"])
+    ac4.metric("Attack Types", ar["unique_attack_types"])
+    st.markdown("**Severity distribution**")
+    sevdf = pd.DataFrame({"severity": list(ar["severity_counts"].keys()), "count": list(ar["severity_counts"].values())})
+    st.bar_chart(sevdf.set_index("severity"))
+    st.markdown("**Top attack types**")
+    top_attack_df = pd.DataFrame(list(ar["top_attack_types"].items()), columns=["attack_type","count"])
+    if not top_attack_df.empty: st.bar_chart(top_attack_df.set_index("attack_type"))
+    st.markdown("**Hourly trend**")
+    tr = analytics_trend(st.session_state.logs)
+    if not tr.empty: st.line_chart(tr.set_index("period")[["records","alerts"]])
+    with st.expander("Top sources / analytical detail", expanded=False):
+        render_table([{"Source IP":k,"Events":v} for k,v in ar["top_sources"].items()])
+        if st.session_state.analysis_result:
+            st.json(st.session_state.analysis_result.get("risk_breakdown", {}))
+    st.markdown("**Download / print reports**")
+    report_source = st.session_state.telemetry_source or "Local evidence"
+    bundle = export_bundle(st.session_state.logs, st.session_state.analysis_result, report_source)
+    rc = st.columns(5)
+    for col,key,label,mime in [
+        (rc[0],"pdf","PDF","application/pdf"),
+        (rc[1],"docx","Word","application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        (rc[2],"xlsx","Excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        (rc[3],"pptx","PowerPoint","application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        (rc[4],"json","JSON","application/json"),
+    ]:
+        with col:
+            if st.download_button(f"⬇ {label}",data=bundle[key],file_name=f"vanguard_soc_report.{key}",mime=mime,key=f"report_{key}"):
+                audit_event("SOC_REPORT_EXPORT", f"{report_source}:{key}", st.session_state.analysis_evidence_sha256 or "")
+else:
+    st.info("Analyze local evidence first. Analytics and reports will then use the real analyzed dataset.")
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)
