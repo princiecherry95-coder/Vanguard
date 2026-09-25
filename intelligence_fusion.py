@@ -94,8 +94,8 @@ def corroboration_score(items: list[IntelligenceItem]) -> float:
         * max(0.0, min(1.0, item.confidence))
         for item in items
     ) / len(items)
-    diversity = min(1.0, max(0, len(independent_sources) - 1))
-    return round(min(1.0, evidence * (0.7 + 0.3 * diversity)), 4)
+    diversity_bonus = min(0.3, 0.1 * max(0, len(independent_sources) - 1))
+    return round(min(1.0, evidence * (0.7 + diversity_bonus)), 4)
 
 
 def relate(source: str, target: str, relation: str,
