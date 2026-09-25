@@ -12,6 +12,14 @@ RAW EVIDENCE → VALIDATION → NORMALIZATION → DETECTION → FINDINGS → GRO
 
 COMMAND → TRIAGE → INVESTIGATE → EVIDENCE → DETECTIONS → RESPONSE → AUDIT → SYSTEM HEALTH
 
+## SOC Analytics & Report Center
+
+- Offline analytics: severity distribution, top attack types, top sources, hourly trends, unique-source/target metrics.
+- Locally generated PDF, Word, Excel, PowerPoint and JSON reports from the analyzed evidence set.
+- Report exports are audit-recorded and never require network access.
+- Local tail-file and UDP syslog collectors for controlled continuous ingestion.
+- Cross-platform local firewall adapter with explicit approval and platform capability reporting.
+
 ## Core capabilities
 
 - Heterogeneous local log ingestion: text/syslog, CSV, JSON, JSONL and XML.
