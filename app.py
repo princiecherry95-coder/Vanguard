@@ -256,14 +256,12 @@ with left:
             sev = row["severity"].title()
             state = " • QUARANTINED" if row["source_ip"] in st.session_state.quarantined_ips else ""
             st.markdown(f'<div class="log {sev}"><div class="lh"><span>{html.escape(row["timestamp"])} · <b>{html.escape(row["event_id"])}</b></span><span class="sev">{html.escape(row["severity"])}{state}</span></div><div><b>{html.escape(row["attack_type"])}</b> <span class="pill">{html.escape(row["source_ip"])}</span></div><div class="lm">Target: {html.escape(row["target_endpoint"])}</div></div>', unsafe_allow_html=True)
-            if st.button(f"Inspect {row['event_id']}", key=f"inspect_{row['event_id']}", use_container_width=True):
-                st.session_state.selected_event = row["event_id"]
-                st.session_state.last_action = f"Event inspector opened for {row['event_id']}."
-                st.rerun()
-        options = view["event_id"].tolist()
-        current_index = options.index(st.session_state.selected_event) if st.session_state.selected_event in options else 0
-        selected = st.selectbox("Inspect Event", options, index=current_index)
-        st.session_state.selected_event = selected
+        page_options = [row["event_id"] for row in page_rows]
+        current_page_index = page_options.index(st.session_state.selected_event) if st.session_state.selected_event in page_options else 0
+        selected_page_event = st.selectbox("Select event for investigation", page_options, index=current_page_index)
+        st.session_state.selected_event = selected_page_event
+        if st.button("🔎 Open selected event in Tactical Inspector", type="primary", use_container_width=True):
+            st.session_state.last_action = f"Event inspector opened for {selected_page_event}."
     st.markdown('</div>', unsafe_allow_html=True)
 
 with right:
