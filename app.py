@@ -297,12 +297,3 @@ if st.session_state.logs and st.session_state.analysis_result:
         xlsx_bytes = __import__("reporting").make_xlsx(st.session_state.logs, st.session_state.analysis_result, export_source)
         st.download_button("Download Excel", data=xlsx_bytes, file_name=f"vanguard_analysis_{export_sha[:12]}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
- 
-st.markdown(
-    '<div class="box" style="border-color:#00e5ff;">'
-    '<b>PRIMARY WORKFLOW — EVIDENCE INTAKE</b> &nbsp; '
-    'Upload → Preserve → Analyse → Investigate → Report. '
-    'Start here for local security logs; accepted evidence is SHA-256 preserved before analysis.'
-    '</div>',
-    unsafe_allow_html=True,
-)
