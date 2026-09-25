@@ -32,3 +32,28 @@ def test_report_bundle_contains_required_formats():
     for payload in bundle.values():
         assert isinstance(payload, bytes)
         assert payload
+
+def test_xlsx_preserves_all_evidence_fields_and_records_and_is_print_ready():
+    rows = [
+        {"event_id": "EVT-1", "timestamp": "2026-09-25T10:00:00+00:00", "custom_field": "KEEP-ME", "nested_text": "{\"x\":1}"},
+        {"event_id": "EVT-2", "timestamp": "2026-09-25T10:01:00+00:00", "another_field": "SECOND"},
+    ]
+    payload = export_bundle(rows, {"risk_score": 10, "alerts": [], "analyst_alerts": [], "incidents": [], "parse_coverage": 100}, "test")["xlsx"]
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(payload), data_only=False)
+    assert "Evidence" in wb.sheetnames
+    ws = wb["Evidence"]
+    headers = [c.value for c in ws[1]]
+    assert headers == ["event_id", "timestamp", "custom_field", "nested_text", "another_field"]
+    assert ws.max_row == 3
+    assert ws["C2"].value == "KEEP-ME"
+    assert ws["E3"].value == "SECOND"
+    assert ws.freeze_panes == "A2"
+    assert ws.auto_filter.ref == ws.dimensions
+    assert ws.page_setup.paperSize == ws.PAPERSIZE_A4
+    assert ws.page_setup.orientation == "landscape"
+    assert ws.page_setup.fitToWidth == 1
+    assert ws.print_area == ws.dimensions
+    assert ws.oddFooter.center.text == "VANGUARD SOC • Page &P of &N"
