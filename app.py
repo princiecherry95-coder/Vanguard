@@ -9,7 +9,7 @@ import streamlit as st
 
 from engine import detection_policy
 from ingestion import ALLOWED_UPLOAD_TYPES, MAX_UPLOAD_BYTES
-from audit import audit_event
+from audit import audit_event, verify_audit_chain
 from distributed import EventBuffer
 from firewall import block_ip
 from remediation import propose, execute_approved
@@ -94,6 +94,7 @@ def init_state() -> None:
         "event_buffer": EventBuffer(),
         "dashboard_drilldown": None,
         "log_page": 0,
+        "evidence_store_summary": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -204,15 +205,19 @@ if st.session_state.analysis_summary:
     summary = st.session_state.analysis_summary
     status_label = "ANALYSIS COMPLETE" if st.session_state.analysis_state == "COMPLETE" else st.session_state.analysis_state
     st.success(f"✓ {status_label} • {st.session_state.telemetry_source}")
-    a1, a2, a3, a4, a5 = st.columns(5)
+    a1, a2, a3, a4, a5, a6 = st.columns(6)
     a1.metric("Analyzed Records", len(st.session_state.logs))
     a2.metric("Parsed", len(st.session_state.analysis_result["events"]) if st.session_state.analysis_result else 0)
-    a3.metric("Alerts", len(st.session_state.analysis_result["alerts"]) if st.session_state.analysis_result else 0)
-    a4.metric("Incidents", len(st.session_state.analysis_result["incidents"]) if st.session_state.analysis_result else 0)
-    a5.metric("Risk Score", summary["risk_score"])
+    a3.metric("Raw Alerts", summary.get("raw_alerts", len(st.session_state.analysis_result["alerts"]) if st.session_state.analysis_result else 0))
+    a4.metric("Analyst Findings", summary.get("finding_groups", len(st.session_state.analysis_result.get("analyst_alerts", [])) if st.session_state.analysis_result else 0))
+    a5.metric("Incidents", len(st.session_state.analysis_result["incidents"]) if st.session_state.analysis_result else 0)
+    a6.metric("Risk Score", summary["risk_score"])
     risk_breakdown = st.session_state.analysis_result.get("risk_breakdown", {}) if st.session_state.analysis_result else {}
     if risk_breakdown:
-        st.caption(f"Risk composition • alert points: {risk_breakdown.get('alert_points', 0)} • incident points: {risk_breakdown.get('incident_points', 0)}")
+        st.caption(f"Risk model • {risk_breakdown.get('raw_alerts', 0):,} raw alerts → {risk_breakdown.get('finding_groups', 0):,} analyst finding groups • {risk_breakdown.get('incident_count', 0):,} correlated incidents")
+    if st.session_state.get("evidence_store_summary"):
+        es = st.session_state.evidence_store_summary
+        st.caption(f"Local evidence store • {es.get('finding_groups', 0):,} persisted finding groups • {es.get('finding_occurrences', 0):,} preserved occurrences")
     policy = detection_policy()
     st.caption(f"Detection policy • {policy['brute_force_failures']} failures / {policy['behavior_window_seconds']}s • {policy['scan_unique_destinations']} unique destinations / {policy['behavior_window_seconds']}s • correlation {policy['correlation_window_seconds']}s")
     st.caption(f"Parse coverage {summary['parse_coverage']:.1f}% • {summary['unique_sources']} unique source(s) • {summary['unique_destinations']} unique destination(s) • Completed {st.session_state.analysis_completed_at or 'now'}")
@@ -266,14 +271,23 @@ with left:
 
 with right:
     log = selected_log()
-    st.markdown('<div class="panel"><div class="pt">Tactical AI Inspector & Playbook</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel"><div class="pt">Tactical Analyst Inspector & Response</div>', unsafe_allow_html=True)
     if log is None:
         st.info("No telemetry available.")
     else:
         st.markdown(f'<div class="box"><b>Event ID</b><br>{html.escape(log["event_id"])}<br><br><b>Source IP</b><br>{html.escape(log["source_ip"])}<br><br><b>Target Endpoint</b><br>{html.escape(log["target_endpoint"])}</div>', unsafe_allow_html=True)
-        st.caption("RAW PAYLOAD")
+        findings = st.session_state.analysis_result.get("analyst_alerts", []) if st.session_state.analysis_result else []
+        finding = next((item for item in findings if log.get("raw_sha256") in item.get("evidence_ids", [])), None)
+        if finding:
+            st.markdown(
+                f'<div class="box"><b>Finding</b> {html.escape(finding["alert_id"])} • <b>{html.escape(finding["severity"])}</b> • Confidence {html.escape(finding["confidence"])}<br>'
+                f'Rule {html.escape(finding["rule_id"])} v{html.escape(finding["rule_version"])} • MITRE {html.escape(finding.get("mitre_technique") or "Not mapped")}<br>'
+                f'Occurrences {finding["count"]:,} • Sources {len(finding["sources"]):,} • Destinations {len(finding["destinations"]):,}</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption("RAW PAYLOAD • SANITIZED DISPLAY")
         st.code(log["raw_payload"], language="text")
-        st.markdown(f'<div class="ai"><b>Plain-language AI threat translation</b><br><br>{html.escape(log["description"])}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="ai"><b>Deterministic defensive translation</b><br><br>{html.escape(log["description"])}</div>', unsafe_allow_html=True)
         st.write("")
         q1, q2 = st.columns(2)
         with q1:
@@ -406,7 +420,9 @@ with st.expander("Analyze local log lines", expanded=False):
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)
+st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>
+<div class="box">Offline runtime • local evidence store • append-only audit verification • no external telemetry.</div>
+<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)
 st.caption("Optional capabilities remain local-first and require explicit configuration or analyst approval.")
 cap1, cap2, cap3 = st.columns(3)
 with cap1:
