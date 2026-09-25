@@ -247,8 +247,14 @@ if st.session_state.analysis_summary:
         if quality["future_timestamps"]:
             st.warning(f'{quality["future_timestamps"]:,} timestamp(s) are in the future relative to the analysis runtime.')
     with q2:
-        st.markdown("**Telemetry Sources**")
-        render_table(soc_context["sources"][:12])
+        st.markdown("**Telemetry Sources / Assets**")
+        render_table(soc_context["sources"][:8])
+        if soc_context["assets"]:
+            with st.expander("Asset context", expanded=False):
+                render_table(soc_context["assets"][:12])
+        if soc_context["identities"]:
+            with st.expander("Identity activity", expanded=False):
+                render_table(soc_context["identities"][:12])
         if window["first_seen"] and window["last_seen"]:
             st.caption(f'Observed window: {window["first_seen"]} → {window["last_seen"]}')
         else:
@@ -272,6 +278,10 @@ if st.session_state.analysis_summary:
             st.info(f'Baseline not calculated: {baseline["buckets"]} observed time bucket(s). At least 3 are required.')
 
     st.markdown("**Source / Asset Context**")
+    st.caption("Asset and identity values are derived only when present in the evidence. Missing ownership, business criticality and directory context remain unavailable.")
+    if soc_context["incidents"]:
+        with st.expander("Correlated incidents", expanded=False):
+            render_table(soc_context["incidents"][:30])
     st.caption("Sources are derived from the loaded evidence. Asset identity, ownership and criticality remain unavailable unless the source logs provide them or an asset inventory is configured.")
     st.markdown("**Detection Coverage**")
     coverage = soc_context["coverage"]["observed_category_rates"]
