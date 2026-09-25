@@ -1,0 +1,8 @@
+# Security-sensitive areas require maintainer review
+* @princiecherry95-coder
+/.github/ @princiecherry95-coder
+/engine.py @princiecherry95-coder
+/ingestion.py @princiecherry95-coder
+/audit.py @princiecherry95-coder
+/firewall.py @princiecherry95-coder
+/remediation.py @princiecherry95-coder
