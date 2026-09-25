@@ -58,3 +58,5 @@ def test_full_context_is_consistent():
     assert result["window"]["timestamped_records"] == 4
     assert result["duplicates"]["unique_events"] == 3
     assert result["coverage"]["analyzed_alerts"] == 2
+    assert result["assets"][0]["asset"] == "10.0.0.1"
+    assert result["identities"][0]["identity"] == "alice"
