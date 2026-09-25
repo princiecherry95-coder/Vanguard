@@ -181,9 +181,24 @@ class EvidenceStore:
         conn = self._connect()
         try:
             for f in analyst_alerts:
-                key = str(f.get("alert_id") or f"{f.get('rule_id','UNKNOWN')}:{f.get('reason','')}")
-                conn.execute("INSERT OR REPLACE INTO analysis_findings (run_id,evidence_sha256,finding_key,finding_id,rule_id,rule_version,severity,confidence,occurrence_count,source_count,destination_count,mitre_technique,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (run_id,evidence_sha256,key,str(f.get("alert_id",key)),str(f.get("rule_id","UNKNOWN")),str(f.get("rule_version","")),str(f.get("severity","UNKNOWN")),str(f.get("confidence","UNKNOWN")),int(f.get("count",0)),len(f.get("sources",[])),len(f.get("destinations",[])),f.get("mitre_technique"),str(f.get("reason",""))))
+                rule_id = str(f.get("rule_id", "UNKNOWN")).strip()
+                reason = " ".join(str(f.get("reason", "")).split()).strip()
+                mitre = str(f.get("mitre_technique") or "").strip()
+                identity = f"{rule_id}|{reason}|{mitre}"
+                key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+                conn.execute(
+                    "INSERT OR REPLACE INTO analysis_findings "
+                    "(run_id,evidence_sha256,finding_key,finding_id,rule_id,rule_version,severity,confidence,"
+                    "occurrence_count,source_count,destination_count,mitre_technique,reason) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        run_id, evidence_sha256, key, str(f.get("alert_id", key)), rule_id,
+                        str(f.get("rule_version", "")), str(f.get("severity", "UNKNOWN")),
+                        str(f.get("confidence", "UNKNOWN")), int(f.get("count", 0)),
+                        len(f.get("sources", [])), len(f.get("destinations", [])),
+                        f.get("mitre_technique"), reason,
+                    ),
+                )
             conn.commit()
         finally: conn.close()
 
@@ -193,13 +208,23 @@ class EvidenceStore:
             prev=conn.execute("SELECT id FROM analysis_runs WHERE evidence_sha256=? AND status='COMPLETE' AND id<? ORDER BY id DESC LIMIT 1",(evidence_sha256,run_id)).fetchone()
             cols=["finding_key","rule_id","rule_version","severity","confidence","occurrence_count","source_count","destination_count","mitre_technique","reason"]
             cur=[dict(zip(cols,r)) for r in conn.execute("SELECT finding_key,rule_id,rule_version,severity,confidence,occurrence_count,source_count,destination_count,mitre_technique,reason FROM analysis_findings WHERE run_id=?",(run_id,)).fetchall()]
-            if not prev: return {"baseline_run_id":None,"added":[],"removed":[],"changed":[],"added_count":0,"removed_count":0,"changed_count":0,"total_variations":0}
+            if not prev:
+                return {
+                    "baseline_run_id": None, "added": [], "removed": [], "changed": [],
+                    "added_count": 0, "removed_count": 0, "changed_count": 0, "total_variations": 0,
+                }
             old=[dict(zip(cols,r)) for r in conn.execute("SELECT finding_key,rule_id,rule_version,severity,confidence,occurrence_count,source_count,destination_count,mitre_technique,reason FROM analysis_findings WHERE run_id=?",(prev[0],)).fetchall()]
-            c={x["finding_key"]:x for x in cur}; o={x["finding_key"]:x for x in old}
-            added=[c[k] for k in sorted(set(c)-set(o))]; removed=[o[k] for k in sorted(set(o)-set(c))]; changed=[]
+            c = {x["finding_key"]: x for x in cur}
+            o = {x["finding_key"]: x for x in old}
+            added = [c[k] for k in sorted(set(c) - set(o))]
+            removed = [o[k] for k in sorted(set(o) - set(c))]
+            changed = []
             for k in sorted(set(c)&set(o)):
                 dif={f:(o[k][f],c[k][f]) for f in cols[1:] if o[k][f]!=c[k][f]}
-                if dif: changed.append({"finding_key":k,"rule_id":c[k]["rule_id"],"reason":c[k]["reason"],"differences":dif})
+                if dif:
+                    changed.append({
+                        "finding_key": k, "rule_id": c[k]["rule_id"], "reason": c[k]["reason"], "differences": dif,
+                    })
             return {"baseline_run_id":prev[0],"added":added,"removed":removed,"changed":changed,"added_count":len(added),"removed_count":len(removed),"changed_count":len(changed),"total_variations":len(added)+len(removed)+len(changed)}
         finally: conn.close()
 
