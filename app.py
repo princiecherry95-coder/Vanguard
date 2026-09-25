@@ -277,7 +277,8 @@ else:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="box" style="border-color:#00e5ff;
+st.markdown('<div class="box" style="border-color:#00e5ff;"><b>PRIMARY WORKFLOW — EVIDENCE INTAKE</b> &nbsp; Upload → Preserve → Analyse → Investigate → Report. Start here for local security logs; accepted evidence is SHA-256 preserved before analysis.</div>', unsafe_allow_html=True)
+
 # Export the exact analyzed dataset after analysis completes.
 if st.session_state.logs and st.session_state.analysis_result:
     export_source = st.session_state.telemetry_source or "Local evidence"
