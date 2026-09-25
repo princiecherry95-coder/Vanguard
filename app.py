@@ -29,23 +29,30 @@ st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_ico
 
 
 def _format_audit_timestamp(value):
-    if not value: return '—'
+    if not value:
+        return '—'
     try:
-        dt=datetime.fromisoformat(str(value).replace('Z','+00:00'))
-        if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
         return f"{dt.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')} ({value})"
-    except (TypeError,ValueError): return str(value)
+    except (TypeError, ValueError):
+        return str(value)
 
 def _analysis_duration(started_at, completed_at):
-    if not started_at: return '—'
+    if not started_at:
+        return '—'
     try:
-        start=datetime.fromisoformat(str(started_at).replace('Z','+00:00'))
-        end=datetime.fromisoformat(str(completed_at).replace('Z','+00:00')) if completed_at else datetime.now(timezone.utc)
-        if start.tzinfo is None: start=start.replace(tzinfo=timezone.utc)
-        if end.tzinfo is None: end=end.replace(tzinfo=timezone.utc)
-        seconds=max(0,int((end-start).total_seconds()))
+        start = datetime.fromisoformat(str(started_at).replace('Z', '+00:00'))
+        end = datetime.fromisoformat(str(completed_at).replace('Z', '+00:00')) if completed_at else datetime.now(timezone.utc)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        seconds = max(0, int((end - start).total_seconds()))
         return f"{seconds//3600:02d}:{(seconds%3600)//60:02d}:{seconds%60:02d}"
-    except (TypeError,ValueError): return '—'
+    except (TypeError, ValueError):
+        return '—'
 
 MOCK_LOGS = [
     {"timestamp":"2026-09-17 19:52:14","event_id":"EVT-7F31A9","source_ip":"10.42.17.91","severity":"CRITICAL","target_endpoint":"/api/auth/login","attack_type":"SQL Injection / Tautology Bypass","raw_payload":"' OR '1'='1' --","description":"The request attempts to manipulate an authentication query so the condition evaluates as true, potentially bypassing normal credential validation."},
