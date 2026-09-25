@@ -19,6 +19,7 @@ from local_ai import explain as local_ai_explain
 from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status
 from analytics import summary as analytics_summary, trend as analytics_trend, findings_dataframe, attack_matrix, rule_counts_dataframe
 from reporting import export_bundle
+from intelligence_fusion import extract_iocs
 
 st.set_page_config(page_title="Vanguard-SIEM", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -220,6 +221,97 @@ if st.session_state.analysis_summary:
     if st.session_state.get("evidence_store_summary"):
         es = st.session_state.evidence_store_summary
         st.caption(f"Local evidence store • {es.get('finding_groups', 0):,} persisted finding groups • {es.get('finding_occurrences', 0):,} preserved occurrences")
+    # Evidence-grounded analytics: every figure below is derived only from the
+    # currently loaded evidence set. Empty evidence produces no synthetic chart.
+    evidence_metrics = analytics_summary(st.session_state.logs)
+    st.markdown("### Intelligence Analytics — Evidence Grounded")
+    st.caption(
+        "All figures are computed from the loaded evidence in this session. "
+        "Vanguard does not invent zeroes, estimates, or live external telemetry. "
+        f"Evidence SHA-256: {st.session_state.analysis_evidence_sha256 or 'NOT AVAILABLE'}"
+    )
+    im1, im2, im3, im4 = st.columns(4)
+    im1.metric("Observed Records", evidence_metrics["records"])
+    im2.metric("Unique Sources", evidence_metrics["unique_sources"])
+    im3.metric("Unique Targets", evidence_metrics["unique_targets"])
+    im4.metric("Alert Rate", f'{evidence_metrics["alert_rate_pct"]:.2f}%')
+    if evidence_metrics["first_seen"] and evidence_metrics["last_seen"]:
+        st.caption(
+            f"Observed window: {evidence_metrics['first_seen']} → {evidence_metrics['last_seen']} • "
+            f"source: {st.session_state.telemetry_source}"
+        )
+
+    if st.session_state.logs:
+        chart_left, chart_right = st.columns(2)
+        with chart_left:
+            severity_df = pd.DataFrame.from_dict(
+                evidence_metrics["severity_counts"], orient="index", columns=["events"]
+            )
+            severity_df.index.name = "severity"
+            st.markdown("**Severity distribution — observed events**")
+            st.bar_chart(severity_df, use_container_width=True)
+        with chart_right:
+            top_attacks = pd.DataFrame.from_dict(
+                evidence_metrics["top_attack_types"], orient="index", columns=["events"]
+            ).head(10)
+            top_attacks.index.name = "attack_type"
+            st.markdown("**Observed attack/event categories**")
+            if not top_attacks.empty:
+                st.bar_chart(top_attacks, use_container_width=True)
+            else:
+                st.info("No categorized attack/event data is present in the evidence.")
+
+        trend_df = analytics_trend(st.session_state.logs)
+        if not trend_df.empty:
+            trend_view = trend_df.set_index("period")[["records", "alerts", "critical"]]
+            st.markdown("**Evidence activity over time**")
+            st.line_chart(trend_view, use_container_width=True)
+        else:
+            st.info("No valid timestamps are available for a time-series chart.")
+
+        source_df = pd.DataFrame.from_dict(
+            evidence_metrics["top_sources"], orient="index", columns=["events"]
+        ).head(10)
+        source_df.index.name = "source"
+        if not source_df.empty:
+            st.markdown("**Most active observed sources**")
+            st.bar_chart(source_df, use_container_width=True)
+
+        finding_df = findings_dataframe(st.session_state.analysis_result)
+        if not finding_df.empty:
+            attack_coverage = (
+                finding_df.dropna(subset=["mitre_technique"])
+                .query("mitre_technique != ''")
+                .groupby("mitre_technique", as_index=True)["count"]
+                .sum()
+                .sort_values(ascending=False)
+                .head(15)
+                .to_frame("observed_findings")
+            )
+            if not attack_coverage.empty:
+                st.markdown("**ATT&CK-linked observed findings**")
+                st.bar_chart(attack_coverage, use_container_width=True)
+
+        # IOC analytics are extracted from the evidence payload itself; they are
+        # not external threat intelligence and are never presented as confirmed.
+        iocs = extract_iocs(
+            "\n".join(str(row.get("raw_payload", "")) for row in st.session_state.logs),
+            source="loaded-evidence",
+            observed_at=evidence_metrics["last_seen"],
+        )
+        if iocs:
+            ioc_df = pd.DataFrame(
+                [{"kind": item.kind, "count": 1} for item in iocs]
+            ).groupby("kind").sum().sort_values("count", ascending=False)
+            st.markdown("**IOCs extracted from loaded evidence**")
+            st.bar_chart(ioc_df, use_container_width=True)
+            st.caption(
+                f"{len(iocs)} unique IOC(s) extracted from evidence. "
+                "These are OBSERVED artifacts, not externally validated threat intelligence."
+            )
+    else:
+        st.info("No evidence is loaded. Analytics remain empty rather than displaying synthetic or stale figures.")
+
     policy = detection_policy()
     st.caption(f"Detection policy • {policy['brute_force_failures']} failures / {policy['behavior_window_seconds']}s • {policy['scan_unique_destinations']} unique destinations / {policy['behavior_window_seconds']}s • correlation {policy['correlation_window_seconds']}s")
     st.caption(f"Parse coverage {summary['parse_coverage']:.1f}% • {summary['unique_sources']} unique source(s) • {summary['unique_destinations']} unique destination(s) • Completed {st.session_state.analysis_completed_at or 'now'}")
