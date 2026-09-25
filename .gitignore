@@ -1,0 +1,42 @@
+# Local environments
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local Vanguard runtime state
+vanguard_audit.jsonl
+vanguard_audit.jsonl.lock
+vanguard_evidence.db
+vanguard_evidence.db-*
+vanguard_threat_intel.json
+*.sqlite
+*.sqlite3
+*.db
+
+# Local evidence / exports
+evidence/
+evidence-cache/
+reports/
+*.pcap
+*.evtx
+*.jsonl
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
