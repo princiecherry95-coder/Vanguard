@@ -23,6 +23,10 @@ class LocalLogCollector:
                         if callback: callback(clean)
                     else: time.sleep(interval)
         self._thread=threading.Thread(target=run,daemon=True); self._thread.start()
+    def snapshot(self): return list(self.lines)
+    def snapshot(self): return list(self.lines)
+    def start(self,callback=None):
+        self._thread=threading.Thread(target=self.serve,args=(callback,),daemon=True); self._thread.start(); return self._thread
     def stop(self): self.running=False
 
 class SyslogUDPCollector:
