@@ -56,7 +56,8 @@ class EvidenceStore:
         return conn
 
     def save_analysis(self, bundle: dict, analyst_alerts: Iterable[dict]) -> None:
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             conn.execute(
                 "INSERT OR IGNORE INTO evidence_sets(sha256,filename,format,record_count,completed_at) VALUES(?,?,?,?,?)",
                 (bundle["sha256"], bundle["filename"], bundle["format"], bundle["records"], bundle["completed_at"]),
@@ -74,9 +75,13 @@ class EvidenceStore:
                         len(finding["destinations"]), finding.get("mitre_technique"), finding["reason"],
                     ),
                 )
+            conn.commit()
+        finally:
+            conn.close()
 
     def summary(self, evidence_sha256: str) -> dict:
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             row = conn.execute(
                 "SELECT filename,format,record_count,completed_at FROM evidence_sets WHERE sha256=?",
                 (evidence_sha256,),
@@ -85,8 +90,10 @@ class EvidenceStore:
                 "SELECT COUNT(*), COALESCE(SUM(occurrence_count),0) FROM findings WHERE evidence_sha256=?",
                 (evidence_sha256,),
             ).fetchone()
-        return {
-            "evidence": row,
-            "finding_groups": int(findings[0] or 0),
-            "finding_occurrences": int(findings[1] or 0),
-        }
+            return {
+                "evidence": row,
+                "finding_groups": int(findings[0] or 0),
+                "finding_occurrences": int(findings[1] or 0),
+            }
+        finally:
+            conn.close()
