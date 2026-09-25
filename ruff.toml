@@ -1,0 +1,7 @@
+target-version = "py311"
+line-length = 120
+
+[lint]
+# Blocking gate: correctness/safety errors only. A separate advisory step
+# reports the broader Ruff rule set without blocking releases.
+select = ["E9", "F63", "F7", "F82"]
