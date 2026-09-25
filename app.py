@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import hashlib
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -25,6 +26,26 @@ from evidence_store import EvidenceStore
 from security_operations import SecurityOperationsStore, telemetry_status
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
+
+
+def _format_audit_timestamp(value):
+    if not value: return '—'
+    try:
+        dt=datetime.fromisoformat(str(value).replace('Z','+00:00'))
+        if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+        return f"{dt.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')} ({value})"
+    except (TypeError,ValueError): return str(value)
+
+def _analysis_duration(started_at, completed_at):
+    if not started_at: return '—'
+    try:
+        start=datetime.fromisoformat(str(started_at).replace('Z','+00:00'))
+        end=datetime.fromisoformat(str(completed_at).replace('Z','+00:00')) if completed_at else datetime.now(timezone.utc)
+        if start.tzinfo is None: start=start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None: end=end.replace(tzinfo=timezone.utc)
+        seconds=max(0,int((end-start).total_seconds()))
+        return f"{seconds//3600:02d}:{(seconds%3600)//60:02d}:{seconds%60:02d}"
+    except (TypeError,ValueError): return '—'
 
 MOCK_LOGS = [
     {"timestamp":"2026-09-17 19:52:14","event_id":"EVT-7F31A9","source_ip":"10.42.17.91","severity":"CRITICAL","target_endpoint":"/api/auth/login","attack_type":"SQL Injection / Tautology Bypass","raw_payload":"' OR '1'='1' --","description":"The request attempts to manipulate an authentication query so the condition evaluates as true, potentially bypassing normal credential validation."},
@@ -588,6 +609,10 @@ if history_rows:
     st.caption(f"Upload events preserved: {len(upload_events)} • identical files are deduplicated in the evidence archive but every upload event remains in history.")
     if upload_events:
         render_table(upload_events[:50])
+    export_events = store.export_history(limit=200)
+    st.caption(f"Report/document exports preserved: {len(export_events)} • every completed download records format, filename, export time, evidence SHA-256 and generated-file SHA-256.")
+    if export_events:
+        render_table([{"id": e["id"], "analysis_run": e["analysis_run_id"] or "—", "format": e["format"], "filename": e["filename"], "size_bytes": e["size_bytes"], "exported_at": _format_audit_timestamp(e["exported_at"]), "evidence_sha256": (e["evidence_sha256"][:16] + "…") if e["evidence_sha256"] else "—", "file_sha256": e["file_sha256"][:16] + "…", "status": e["status"]} for e in export_events[:100]])
     choices = [f"{r['id']} • {r['filename']} • {r['uploaded_at']} • {r['evidence_sha256'][:12]}…" for r in history_rows]
     selected_idx = st.selectbox("Select preserved evidence", range(len(choices)), format_func=lambda i: choices[i], key="history_select")
     selected = history_rows[selected_idx]
@@ -595,10 +620,12 @@ if history_rows:
     st.markdown(f"**Analysis / scan count: {len(runs)}**")
     if runs:
         run_rows = []
-        for run in runs:
+        total_runs = len(runs)
+        for ordinal, run in enumerate(runs, start=1):
             variation = store.analysis_variation(selected["evidence_sha256"], run["id"]) if run["status"] == "COMPLETE" else {"total_variations": 0, "added_count": 0, "removed_count": 0, "changed_count": 0}
-            run_rows.append({**{k: run[k] for k in ["id","started_at","completed_at","status","records","finding_groups","risk_score","error"]}, "variations": variation["total_variations"], "added": variation["added_count"], "removed": variation["removed_count"], "changed": variation["changed_count"]})
+            run_rows.append({"scan": f"#{total_runs-ordinal+1}", "run_id": run["id"], "analysis_started": _format_audit_timestamp(run["started_at"]), "analysis_completed": _format_audit_timestamp(run["completed_at"]), "duration": _analysis_duration(run["started_at"], run["completed_at"]), "status": run["status"], "records": run["records"], "finding_groups": run["finding_groups"], "risk_score": run["risk_score"], "variations": variation["total_variations"], "added": variation["added_count"], "removed": variation["removed_count"], "changed": variation["changed_count"], "error": run["error"]})
         render_table(run_rows)
+        st.caption("Analysis timestamps are preserved in the evidence store. Display includes local runtime time plus the original ISO-8601 timestamp.")
         latest_complete = next((r for r in runs if r["status"] == "COMPLETE"), None)
         if latest_complete:
             variation = store.analysis_variation(selected["evidence_sha256"], latest_complete["id"])
@@ -726,6 +753,10 @@ if st.session_state.logs:
         st.warning("REPORT NOT VERIFIED • The current view has no evidence SHA-256. Load and analyze evidence before treating a report as operational.")
     report_source = st.session_state.telemetry_source or "Local evidence"
     bundle = export_bundle(st.session_state.logs, st.session_state.analysis_result, report_source)
+    export_run_id = None
+    if st.session_state.analysis_evidence_sha256:
+        completed_runs = EvidenceStore().analysis_history(st.session_state.analysis_evidence_sha256, limit=100)
+        export_run_id = next((r["id"] for r in completed_runs if r["status"] == "COMPLETE"), None)
     rc = st.columns(7)
     for col,key,label,mime in [
         (rc[0],"pdf","PDF","application/pdf"),
@@ -737,8 +768,13 @@ if st.session_state.logs:
         (rc[6],"json","JSON","application/json"),
     ]:
         with col:
-            if st.download_button(f"⬇ {label}", data=bundle[key], file_name=f"vanguard_soc_report.{key}", mime=mime, key=f"report_{key}"):
-                audit_event("SOC_REPORT_EXPORT", f"{report_source}:{key}", st.session_state.analysis_evidence_sha256 or "")
+            filename = f"vanguard_soc_report.{key}"
+            if st.download_button(f"⬇ {label}", data=bundle[key], file_name=filename, mime=mime, key=f"report_{key}"):
+                evidence_sha256 = st.session_state.analysis_evidence_sha256 or ""
+                EvidenceStore().record_export_event(evidence_sha256, key, filename, bundle[key], analysis_run_id=export_run_id)
+                audit_event("SOC_REPORT_EXPORT", f"{report_source}:{key}", evidence_sha256)
+                st.session_state.incident_exports += 1
+                st.success(f"{label} export recorded • SHA-256 {hashlib.sha256(bundle[key]).hexdigest()[:16]}…")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
