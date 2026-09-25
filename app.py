@@ -312,8 +312,8 @@ with st.expander("Analyze security logs", expanded=True):
                         lm3.metric("High / Warning", int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0)
                         lm4.metric("Latest Event", preview_rows[-1]["event_id"] if preview_rows else "-")
                         st.caption("LIVE ANALYSIS FEED • records are being normalized while the evidence is analyzed")
-                        st.dataframe(live.tail(100), use_container_width=True, hide_index=True)
-                    preview.dataframe(live.tail(200), use_container_width=True, hide_index=True)
+                        render_table(live.tail(100))
+                    render_table(live.tail(MAX_UI_ROWS))
 
                 bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, fmt, on_chunk=publish_chunk)
                 if bundle["sha256"] != current_digest:
