@@ -6,8 +6,8 @@ SOURCE_PATH = Path(__file__).with_name("app.py")
 SOURCE = SOURCE_PATH.read_text(encoding="utf-8")
 
 REQUIRED = (
-    "VANGUARD-SIEM // SOC INTELLIGENCE CENTER",
-    "Status: SECURED • AIR-GAPPED • OFFLINE • EVIDENCE PROCESSING ONLINE",
+    "VANGUARD",
+    "SECURED &nbsp;•&nbsp; AIR-GAPPED &nbsp;•&nbsp; OFFLINE &nbsp;•&nbsp; EVIDENCE PROCESSING ONLINE",
     'st.toggle("⚡ Demo Mode"',
     '"Total Log Entries"',
     '"Critical Anomalies"',
