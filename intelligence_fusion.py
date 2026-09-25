@@ -80,7 +80,8 @@ def extract_iocs(text: str, *, source: str = "local-evidence",
                 evidence_sha256=digest,
             )
         )
-    return found
+    priority = {"url": 0, "email": 1, "sha256": 2, "sha1": 3, "md5": 4, "ipv4": 5}
+    return sorted(found, key=lambda item: (priority.get(item.kind, 99), item.value.lower()))
 
 
 def corroboration_score(items: list[IntelligenceItem]) -> float:
@@ -93,7 +94,7 @@ def corroboration_score(items: list[IntelligenceItem]) -> float:
         * max(0.0, min(1.0, item.confidence))
         for item in items
     ) / len(items)
-    diversity = min(1.0, len(independent_sources) / 3)
+    diversity = min(1.0, max(0, len(independent_sources) - 1))
     return round(min(1.0, evidence * (0.7 + 0.3 * diversity)), 4)
 
 
