@@ -722,7 +722,7 @@ if st.session_state.logs:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="panel">st.markdown('<div class="panel"><div class="pt">Security Operations Center</div>', unsafe_allow_html=True)
+st.markdown('<div class="panel"><div class="pt">Security Operations Center</div>', unsafe_allow_html=True)
 st.caption("Offline asset, identity, incident and telemetry-health registries. These records are defensive metadata only; no discovery or external network calls are performed.")
 ops = SecurityOperationsStore()
 oc1, oc2, oc3, oc4 = st.columns(4)
@@ -763,7 +763,7 @@ with st.expander("Telemetry Health", expanded=True):
         st.caption(reason)
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)', unsafe_allow_html=True)
+st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)
 h1, h2, h3 = st.columns(3)
 with h1:
     st.metric("Evidence Store", "READY" if st.session_state.get("evidence_store_summary") else "IDLE")
