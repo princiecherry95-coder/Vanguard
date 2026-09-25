@@ -36,7 +36,7 @@ def report_context(rows: list[dict[str, Any]], analysis: dict[str, Any] | None, 
 
 def make_pdf(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report") -> bytes:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
@@ -47,7 +47,7 @@ def make_pdf(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report")
     ctx = report_context(rows, analysis, source)
     s = ctx["analytics"]
     out = BytesIO()
-    doc = SimpleDocTemplate(out, pagesize=A4, rightMargin=14 * mm, leftMargin=14 * mm, topMargin=14 * mm, bottomMargin=14 * mm)
+    doc = SimpleDocTemplate(out, pagesize=landscape(A4), rightMargin=10 * mm, leftMargin=10 * mm, topMargin=12 * mm, bottomMargin=12 * mm)
     styles = getSampleStyleSheet()
     story = [
         Paragraph(title, styles["Title"]),
@@ -95,12 +95,30 @@ def make_pdf(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report")
         data += [[str(r.alert_id), str(r.rule_id), str(r.severity), str(r.confidence), str(r["count"])] for _, r in findings.head(100).iterrows()]
         story.append(Table(data, repeatRows=1, style=TableStyle([("GRID", (0, 0), (-1, -1), .25, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 7)])))
 
-    story += [PageBreak(), Paragraph("Evidence sample (first 500 records)", styles["Heading2"])]
-    data = [["Event ID", "Time", "Severity", "Source", "Attack type"]]
-    for r in rows[:500]:
-        data.append([str(r.get("event_id", "")), str(r.get("timestamp", "")), str(r.get("severity", "")), str(r.get("source_ip", "")), str(r.get("attack_type", ""))[:70]])
-    story.append(Table(data, repeatRows=1, style=TableStyle([("GRID", (0, 0), (-1, -1), .25, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 6), ("VALIGN", (0, 0), (-1, -1), "TOP")])))
-
+    story += [PageBreak(), Paragraph("Complete Evidence — All Records & Fields", styles["Heading2"])]
+    all_columns = []
+    seen_columns = set()
+    for record in rows:
+        for key in record:
+            key = str(key)
+            if key not in seen_columns:
+                seen_columns.add(key)
+                all_columns.append(key)
+    if all_columns:
+        evidence_data = [all_columns]
+        for record in rows:
+            evidence_data.append([str(record.get(column, "")) for column in all_columns])
+        col_width = max(18 * mm, min(55 * mm, (277 * mm) / max(1, len(all_columns))))
+        story.append(Table(evidence_data, repeatRows=1, splitByRow=1, colWidths=[col_width] * len(all_columns), style=TableStyle([
+            ("GRID", (0, 0), (-1, -1), .25, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17212B")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 5.5),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ])))
+    else:
+        story.append(Paragraph("No evidence records were produced.", styles["Normal"]))
     doc.build(story)
     return out.getvalue()
 
@@ -139,12 +157,39 @@ def make_docx(rows, analysis, source, title="Vanguard-SIEM SOC Analytics Report"
         for _, row in findings.head(100).iterrows():
             cells = t.add_row().cells
             for cell, value in zip(cells, [row.alert_id, row.rule_id, row.severity, row.confidence, row["count"]]): cell.text = str(value)
-    d.add_heading("Evidence sample (first 500 records)", 1)
-    t = d.add_table(rows=1, cols=5); t.style = "Table Grid"
-    for cell, h in zip(t.rows[0].cells, ["Event ID", "Time", "Severity", "Source", "Attack"]): cell.text = h
-    for r in rows[:500]:
-        cells = t.add_row().cells
-        for cell, value in zip(cells, [r.get("event_id", ""), r.get("timestamp", ""), r.get("severity", ""), r.get("source_ip", ""), r.get("attack_type", "")]): cell.text = str(value)[:100]
+    from docx.enum.section import WD_ORIENT
+    section = d.sections[-1]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    section.left_margin = Inches(0.35)
+    section.right_margin = Inches(0.35)
+    d.add_page_break()
+    d.add_heading("Complete Evidence — All Records & Fields", 1)
+    all_columns = []
+    seen_columns = set()
+    for record in rows:
+        for key in record:
+            key = str(key)
+            if key not in seen_columns:
+                seen_columns.add(key)
+                all_columns.append(key)
+    if all_columns:
+        t = d.add_table(rows=1, cols=len(all_columns))
+        t.style = "Table Grid"
+        t.autofit = True
+        for cell, header in zip(t.rows[0].cells, all_columns):
+            cell.text = header
+        for r in rows:
+            cells = t.add_row().cells
+            for cell, column in zip(cells, all_columns):
+                cell.text = str(r.get(column, ""))
+        from docx.oxml import OxmlElement
+        trPr = t.rows[0]._tr.get_or_add_trPr()
+        tblHeader = OxmlElement("w:tblHeader")
+        tblHeader.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "true")
+        trPr.append(tblHeader)
+    else:
+        d.add_paragraph("No evidence records were produced.")
     out = BytesIO(); d.save(out); return out.getvalue()
 
 
