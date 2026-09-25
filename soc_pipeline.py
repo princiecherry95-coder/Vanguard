@@ -7,6 +7,7 @@ from typing import Any
 from audit import audit_event
 from engine import analyze_events, parse_line
 from ingestion import MAX_RECORDS, infer_upload_format, infer_upload_format_bytes, iter_upload_records, lines_from_upload, safe_uploaded_text, validate_upload_size
+from evidence_store import EvidenceStore
 
 
 def _normalize_format(format_hint: str, text: str, filename: str) -> str:
@@ -194,7 +195,12 @@ def commit_dashboard_state(st, bundle: dict[str, Any], source_label: str) -> Non
         "unique_destinations": len(analysis["unique_destinations"]),
         "rule_counts": analysis["rule_counts"],
         "severity_counts": analysis["severity_counts"],
+        "raw_alerts": len(analysis["alerts"]),
+        "finding_groups": len(analysis.get("analyst_alerts", [])),
     }
+    store = EvidenceStore()
+    store.save_analysis(bundle, analysis.get("analyst_alerts", []))
+    st.session_state.evidence_store_summary = store.summary(bundle["sha256"])
     st.session_state.analysis_completed_at = bundle["completed_at"]
     st.session_state.analysis_evidence_sha256 = bundle["sha256"]
     st.session_state.pipeline_source = source_label
