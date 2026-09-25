@@ -22,6 +22,7 @@ from reporting import export_bundle
 from intelligence_fusion import extract_iocs
 from soc_context import build_soc_context
 from evidence_store import EvidenceStore
+from security_operations import SecurityOperationsStore, telemetry_status
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -717,7 +718,48 @@ if st.session_state.logs:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)
+st.markdown('<div class="panel">st.markdown('<div class="panel"><div class="pt">Security Operations Center</div>', unsafe_allow_html=True)
+st.caption("Offline asset, identity, incident and telemetry-health registries. These records are defensive metadata only; no discovery or external network calls are performed.")
+ops = SecurityOperationsStore()
+oc1, oc2, oc3, oc4 = st.columns(4)
+assets = ops.assets()
+identities = ops.identities()
+incidents = ops.incidents()
+telemetry = ops.telemetry()
+oc1.metric("Registered Assets", len(assets))
+oc2.metric("Identities", len(identities))
+oc3.metric("Incidents / Cases", len(incidents))
+oc4.metric("Telemetry Sources", len(telemetry))
+
+with st.expander("Asset Registry", expanded=False):
+    if assets: render_table(assets)
+    else: st.info("No assets registered. Import or enter authorized asset metadata.")
+with st.expander("Identity Registry", expanded=False):
+    if identities: render_table(identities)
+    else: st.info("No identities registered.")
+with st.expander("Incident & Case Register", expanded=True):
+    if incidents: render_table(incidents)
+    else: st.info("No incidents registered. Detection output remains evidence-based until a case is created.")
+with st.expander("Telemetry Health", expanded=True):
+    if telemetry:
+        render_table(telemetry)
+    else:
+        st.info("No telemetry-health records yet. UNKNOWN means no telemetry is available; it is not treated as zero activity.")
+    if st.session_state.logs:
+        source_key = st.session_state.telemetry_source or "local-evidence"
+        last_event = None
+        observed_rate = None
+        if st.session_state.logs:
+            timestamps = [x.get("timestamp") for x in st.session_state.logs if x.get("timestamp")]
+            last_event = max(timestamps) if timestamps else None
+            observed_rate = float(len(st.session_state.logs))
+        status, reason = telemetry_status(last_event, observed_rate, None)
+        ops.record_telemetry_health(source_key, last_event=last_event, observed_rate=observed_rate, status=status, reason=reason)
+        st.metric("Current source health", status)
+        st.caption(reason)
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">System Health & Integrity</div>', unsafe_allow_html=True)', unsafe_allow_html=True)
 h1, h2, h3 = st.columns(3)
 with h1:
     st.metric("Evidence Store", "READY" if st.session_state.get("evidence_store_summary") else "IDLE")
