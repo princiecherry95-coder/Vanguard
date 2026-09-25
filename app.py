@@ -553,6 +553,11 @@ if st.session_state.logs:
             st.bar_chart(rdf.head(15).set_index("rule_id"))
 
     st.markdown("**Download / print reports**")
+    st.caption("Each report is generated from the exact evidence currently displayed above. No external or estimated figures are added.")
+    if st.session_state.analysis_evidence_sha256:
+        st.success(f"REPORT READY • Evidence {st.session_state.analysis_evidence_sha256[:16]}… • {len(st.session_state.logs):,} observed records")
+    else:
+        st.warning("REPORT NOT VERIFIED • The current view has no evidence SHA-256. Load and analyze evidence before treating a report as operational.")
     report_source = st.session_state.telemetry_source or "Local evidence"
     bundle = export_bundle(st.session_state.logs, st.session_state.analysis_result, report_source)
     rc = st.columns(7)
