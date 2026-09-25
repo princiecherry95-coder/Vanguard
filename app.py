@@ -432,7 +432,8 @@ with h3:
 st.caption("Offline runtime • local evidence store • append-only audit verification • no external telemetry.")
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)st.caption("Optional capabilities remain local-first and require explicit configuration or analyst approval.")
+st.markdown('<div class="panel"><div class="pt">Local SOC Capability Center</div>', unsafe_allow_html=True)
+st.caption("Optional capabilities remain local-first and require explicit configuration or analyst approval.")
 cap1, cap2, cap3 = st.columns(3)
 with cap1:
     st.write("**Windows Event Logs**")
