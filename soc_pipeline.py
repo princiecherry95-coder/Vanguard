@@ -6,7 +6,7 @@ from typing import Any
 
 from audit import audit_event
 from engine import analyze_events, parse_line
-from ingestion import MAX_RECORDS, infer_upload_format, lines_from_upload, safe_uploaded_text
+from ingestion import MAX_RECORDS, infer_upload_format, infer_upload_format_bytes, iter_upload_records, lines_from_upload, safe_uploaded_text, validate_upload_size
 
 
 def _normalize_format(format_hint: str, text: str, filename: str) -> str:
@@ -65,30 +65,33 @@ def analyze_bytes(data: bytes, filename: str, format_hint: str = "AUTO") -> dict
 
 
 def analyze_bytes_incremental(data: bytes, filename: str, format_hint: str = "AUTO", on_chunk=None, chunk_size: int = 5000):
-    """Parse evidence in bounded chunks and publish optional progress previews."""
-    text, digest = safe_uploaded_text(data, filename)
-    actual_fmt = _normalize_format(format_hint, text, filename)
-    lines = lines_from_upload(text, actual_fmt)
-    if not lines:
-        raise ValueError("No non-empty records were found.")
-    if len(lines) > MAX_RECORDS:
-        raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per evidence set.")
+    """Analyze every evidence record while keeping UI previews bounded.
+
+    JSONL/text/CSV records are streamed from the uploaded byte buffer. The
+    complete normalized event set is retained for deterministic correlation
+    and final dashboard state; only the visible preview is bounded.
+    """
+    validate_upload_size(len(data))
+    import hashlib
+    digest = hashlib.sha256(data).hexdigest()
+    requested = (format_hint or "AUTO").upper()
+    actual_fmt = infer_upload_format_bytes(data, filename) if requested == "AUTO" else (
+        "TEXT" if requested == "TEXT / SYSLOG" else requested
+    )
     events = []
-    total = len(lines)
-    size = max(1, chunk_size)
-    for start in range(0, total, size):
-        chunk = lines[start:start + size]
+    parsed_total = 0
+    chunk = []
+    for line in iter_upload_records(data, actual_fmt):
+        chunk.append(line)
+        if len(chunk) < max(1, chunk_size):
+            continue
         parsed = []
-        for line in chunk:
+        for record in chunk:
             try:
-                parsed.append(parse_line(line, actual_fmt))
+                parsed.append(parse_line(record, actual_fmt))
             except Exception:
-                # Preserve the evidence record as an unclassified event instead of
-                # dropping it or aborting the entire analysis because one malformed row
-                # cannot be normalized.
                 from engine import NormalizedEvent
-                import hashlib
-                clean = str(line).strip()
+                clean = str(record).strip()
                 parsed.append(NormalizedEvent(
                     timestamp=datetime.now(timezone.utc),
                     source_ip=None,
@@ -104,11 +107,45 @@ def analyze_bytes_incremental(data: bytes, filename: str, format_hint: str = "AU
                     fields={"parse_error": "record could not be normalized"},
                 ))
         events.extend(parsed)
+        parsed_total += len(parsed)
+        if parsed_total > MAX_RECORDS:
+            raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per evidence set.")
         if on_chunk is not None:
-            on_chunk(parsed, len(events), total)
+            on_chunk(parsed, parsed_total, None)
+        chunk = []
+    if chunk:
+        parsed = []
+        for record in chunk:
+            try:
+                parsed.append(parse_line(record, actual_fmt))
+            except Exception:
+                from engine import NormalizedEvent
+                clean = str(record).strip()
+                parsed.append(NormalizedEvent(
+                    timestamp=datetime.now(timezone.utc),
+                    source_ip=None,
+                    destination_ip=None,
+                    user=None,
+                    process_id=None,
+                    event_type="UNPARSED",
+                    action="PARSE_ERROR",
+                    severity="LOW",
+                    message=clean[:4096],
+                    raw_sha256=hashlib.sha256(clean.encode("utf-8")).hexdigest(),
+                    source_format=actual_fmt,
+                    fields={"parse_error": "record could not be normalized"},
+                ))
+        events.extend(parsed)
+        parsed_total += len(parsed)
+        if parsed_total > MAX_RECORDS:
+            raise ValueError(f"Record limit exceeded: maximum {MAX_RECORDS:,} records per evidence set.")
+        if on_chunk is not None:
+            on_chunk(parsed, parsed_total, None)
+    if parsed_total == 0:
+        raise ValueError("No non-empty records were found.")
     analysis = analyze_events(events)
     return {
-        "filename": filename, "format": actual_fmt, "sha256": digest, "records": total,
+        "filename": filename, "format": actual_fmt, "sha256": digest, "records": parsed_total,
         "events": events, "analysis": analysis,
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
