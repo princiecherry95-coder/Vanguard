@@ -9,6 +9,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from typing import Iterable
+import hashlib
+from datetime import datetime, timezone
 
 
 SCHEMA = """
@@ -22,6 +24,10 @@ CREATE TABLE IF NOT EXISTS evidence_sets (
     completed_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS evidence_history (id INTEGER PRIMARY KEY AUTOINCREMENT,evidence_sha256 TEXT NOT NULL UNIQUE,filename TEXT NOT NULL,format TEXT NOT NULL,size_bytes INTEGER NOT NULL,stored_path TEXT NOT NULL,uploaded_at TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'STORED');
+CREATE TABLE IF NOT EXISTS analysis_runs (id INTEGER PRIMARY KEY AUTOINCREMENT,evidence_sha256 TEXT NOT NULL,started_at TEXT NOT NULL,completed_at TEXT,status TEXT NOT NULL,records INTEGER NOT NULL DEFAULT 0,finding_groups INTEGER NOT NULL DEFAULT 0,risk_score REAL,error TEXT);
+CREATE INDEX IF NOT EXISTS idx_history_uploaded_at ON evidence_history(uploaded_at);
+CREATE INDEX IF NOT EXISTS idx_runs_evidence ON analysis_runs(evidence_sha256);
 CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     evidence_sha256 TEXT NOT NULL,
@@ -76,6 +82,77 @@ class EvidenceStore:
                     ),
                 )
             conn.commit()
+        finally:
+            conn.close()
+
+
+    def archive_evidence(self, data: bytes, filename: str, format_name: str, uploaded_at: str | None = None) -> str:
+        digest = hashlib.sha256(data).hexdigest()
+        root = self.path.parent / 'evidence_archive'
+        root.mkdir(parents=True, exist_ok=True)
+        safe_name = ''.join(c if c.isalnum() or c in '._-' else '_' for c in Path(filename).name)[:120] or 'evidence.log'
+        stored = root / f'{digest[:16]}_{safe_name}'
+        if not stored.exists():
+            stored.write_bytes(bytes(data))
+        conn = self._connect()
+        try:
+            conn.execute('INSERT OR IGNORE INTO evidence_history(evidence_sha256,filename,format,size_bytes,stored_path,uploaded_at) VALUES(?,?,?,?,?,?)', (digest, Path(filename).name, format_name.upper(), len(data), str(stored), uploaded_at or datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+        finally:
+            conn.close()
+        return digest
+
+    def history(self, limit: int = 100) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute('SELECT id,evidence_sha256,filename,format,size_bytes,stored_path,uploaded_at,status FROM evidence_history ORDER BY uploaded_at DESC LIMIT ?', (max(1, min(limit, 500)),)).fetchall()
+            cols = ['id','evidence_sha256','filename','format','size_bytes','stored_path','uploaded_at','status']
+            return [dict(zip(cols, row)) for row in rows]
+        finally:
+            conn.close()
+
+    def load_evidence(self, evidence_sha256: str) -> tuple[bytes, dict]:
+        conn = self._connect()
+        try:
+            row = conn.execute('SELECT filename,format,stored_path,uploaded_at,size_bytes FROM evidence_history WHERE evidence_sha256=?', (evidence_sha256,)).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            raise FileNotFoundError('Evidence record was not found.')
+        path = Path(row[2])
+        if not path.exists():
+            raise FileNotFoundError('Evidence archive file is missing.')
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != evidence_sha256:
+            raise ValueError('Evidence integrity check failed: SHA-256 mismatch.')
+        return data, {'filename': row[0], 'format': row[1], 'uploaded_at': row[3], 'size_bytes': row[4]}
+
+    def start_analysis_run(self, evidence_sha256: str, started_at: str | None = None) -> int:
+        conn = self._connect()
+        try:
+            cur = conn.execute('INSERT INTO analysis_runs(evidence_sha256,started_at,status) VALUES(?,?,?)', (evidence_sha256, started_at or datetime.now(timezone.utc).isoformat(), 'RUNNING'))
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def finish_analysis_run(self, run_id: int, status: str, records: int = 0, finding_groups: int = 0, risk_score: float | None = None, error: str | None = None) -> None:
+        conn = self._connect()
+        try:
+            conn.execute('UPDATE analysis_runs SET completed_at=?,status=?,records=?,finding_groups=?,risk_score=?,error=? WHERE id=?', (datetime.now(timezone.utc).isoformat(), status, records, finding_groups, risk_score, error, run_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def analysis_history(self, evidence_sha256: str | None = None, limit: int = 100) -> list[dict]:
+        conn = self._connect()
+        try:
+            if evidence_sha256:
+                rows = conn.execute('SELECT id,evidence_sha256,started_at,completed_at,status,records,finding_groups,risk_score,error FROM analysis_runs WHERE evidence_sha256=? ORDER BY started_at DESC LIMIT ?', (evidence_sha256, max(1, min(limit, 500)))).fetchall()
+            else:
+                rows = conn.execute('SELECT id,evidence_sha256,started_at,completed_at,status,records,finding_groups,risk_score,error FROM analysis_runs ORDER BY started_at DESC LIMIT ?', (max(1, min(limit, 500)))).fetchall()
+            cols = ['id','evidence_sha256','started_at','completed_at','status','records','finding_groups','risk_score','error']
+            return [dict(zip(cols, row)) for row in rows]
         finally:
             conn.close()
 
