@@ -90,3 +90,72 @@ def lines_from_upload(text: str, fmt: str) -> list[str]:
         except ET.ParseError:
             return [line for line in text.splitlines() if line.strip()]
     return [line for line in text.splitlines() if line.strip()]
+
+
+def infer_upload_format_bytes(data: bytes, filename: str = "") -> str:
+    """Infer format from a bounded byte sample; never scan the complete upload."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("Upload content must be bytes.")
+    sample = bytes(data[:64 * 1024]).decode("utf-8-sig", errors="replace")
+    if not sample.strip():
+        return "TEXT"
+    try:
+        parsed = json.loads(sample)
+        if isinstance(parsed, (dict, list)):
+            return "JSON"
+    except json.JSONDecodeError:
+        pass
+    for line in sample.splitlines():
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+            if isinstance(parsed, dict):
+                return "JSONL"
+        except json.JSONDecodeError:
+            break
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else "txt"
+    return {"csv": "CSV", "jsonl": "JSONL", "json": "JSON", "xml": "XML"}.get(suffix, "TEXT")
+
+
+def iter_upload_records(data: bytes, fmt: str):
+    """Yield sanitized logical records without materializing a full record list."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise ValueError("Upload content must be bytes.")
+    validate_upload_size(len(data))
+    fmt = fmt.upper()
+    if fmt in {"TEXT", "JSONL"}:
+        stream = io.BytesIO(data)
+        for raw_line in stream:
+            if b"\x00" in raw_line:
+                raise ValueError("Binary content detected in evidence.")
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if line:
+                yield line
+        return
+    if fmt == "CSV":
+        stream = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", errors="replace", newline="")
+        reader = csv.DictReader(stream)
+        for row in reader:
+            yield json.dumps(row, ensure_ascii=False)
+        return
+    if fmt == "JSON":
+        text = bytes(data).decode("utf-8-sig", errors="replace")
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            source = parsed
+        elif isinstance(parsed, dict):
+            source = next((parsed[key] for key in ("events", "logs", "records", "data", "items", "results")
+                           if isinstance(parsed.get(key), list)), None)
+            if source is None:
+                source = [parsed]
+        else:
+            source = [parsed]
+        for item in source:
+            yield json.dumps(item, ensure_ascii=False)
+        return
+    if fmt == "XML":
+        text = bytes(data).decode("utf-8-sig", errors="replace")
+        yield text.strip()
+        return
+    raise ValueError(f"Unsupported evidence format: {fmt}")
