@@ -175,7 +175,7 @@ def make_xlsx(rows, analysis, source) -> bytes:
 
     trend = __import__("analytics").trend(rows)
     trws = wb.create_sheet("Trend"); trws.append(["Period", "Records", "Alerts", "Critical"])
-    for _, row in trend.iterrows(): trws.append([row["period"].to_pydatetime(), int(row["records"]), int(row["alerts"]), int(row["critical"])])
+    for _, row in trend.iterrows(): trws.append([row["period"].to_pydatetime().replace(tzinfo=None), int(row["records"]), int(row["alerts"]), int(row["critical"])])
     if trws.max_row > 1:
         line = LineChart(); line.title = "Hourly evidence trend"; line.y_axis.title = "Count"
         line.add_data(Reference(trws, min_col=2, max_col=4, min_row=1, max_row=trws.max_row), titles_from_data=True)
