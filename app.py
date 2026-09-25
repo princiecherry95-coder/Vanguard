@@ -189,6 +189,99 @@ with c2:
             st.session_state.selected_event = None
             st.session_state.telemetry_source = "No local evidence loaded"
         st.rerun()
+st.markdown('<div class="panel"><div class="pt">Evidence Intake</div>', unsafe_allow_html=True)
+st.caption(f"Local evidence analysis • up to {MAX_UPLOAD_BYTES / (1024**3):.0f} GiB per file • sanitized, hashed and analyzed offline. No separate validation/staging step is required.")
+
+with st.expander("Analyze security logs", expanded=True):
+    uploaded = st.file_uploader(
+        "Choose a local log file",
+        type=sorted(ALLOWED_UPLOAD_TYPES),
+        accept_multiple_files=False,
+        max_upload_size=1024,
+        help="Local files up to 1 GiB. Uploaded content is never executed.",
+    )
+    fmt = st.selectbox("Format", ["AUTO", "TEXT / SYSLOG", "CSV", "JSON", "JSONL", "XML"])
+    source_name = st.text_input("Source", value="Local evidence")
+
+    if uploaded is None:
+        st.info("Select a local evidence file, then click Analyze. No separate validation step is required.")
+    else:
+        raw_bytes = uploaded.getvalue()
+        current_digest = __import__("hashlib").sha256(raw_bytes).hexdigest()
+        size_mb = len(raw_bytes) / (1024 * 1024)
+        st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • SHA-256 {current_digest[:16]}…")
+
+        if st.button("Analyze Evidence", type="primary", use_container_width=True):
+            run_id = None
+            try:
+                archive = EvidenceStore()
+                archive.archive_evidence(raw_bytes, uploaded.name, fmt)
+                run_id = archive.start_analysis_run(current_digest)
+                st.session_state.analysis_state = "ANALYZING"
+                st.session_state.pipeline_stage = "ANALYZE"
+                progress = st.progress(0, text="Starting evidence analysis…")
+                live_dashboard.empty()
+                preview = st.empty()
+                from collections import deque
+                preview_rows = deque(maxlen=MAX_UI_ROWS)
+
+                def publish_chunk(events, processed, total):
+                    for event in events:
+                        preview_rows.append({
+                            "event_id": f"EVT-{event.raw_sha256[:10].upper()}",
+                            "timestamp": event.timestamp.isoformat(),
+                            "severity": event.severity or "LOW",
+                            "source_ip": event.source_ip or "N/A",
+                            "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
+                            "attack_type": event.action or event.event_type,
+                        })
+                    if total:
+                        pct = min(0.99, processed / total)
+                        progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
+                    else:
+                        progress.progress(0.0, text=f"Analyzing evidence… {processed:,} records processed • complete evidence scan in progress")
+                    live = pd.DataFrame(list(preview_rows))
+                    with live_dashboard.container():
+                        lm1, lm2, lm3, lm4 = st.columns(4)
+                        lm1.metric("Analyzed Records", processed)
+                        lm2.metric("Critical Anomalies", int((live["severity"] == "CRITICAL").sum()) if not live.empty else 0)
+                        lm3.metric("High / Warning", int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0)
+                        lm4.metric("Latest Event", preview_rows[-1]["event_id"] if preview_rows else "-")
+                        st.caption("LIVE ANALYSIS FEED • records are being normalized while the evidence is analyzed")
+                        render_table(live.tail(MAX_UI_ROWS))
+
+                bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, fmt, on_chunk=publish_chunk)
+                if bundle["sha256"] != current_digest:
+                    raise ValueError("Evidence changed during analysis. Please analyze the current file again.")
+                progress.progress(1.0, text=f"Analysis complete • {bundle['records']:,} records")
+                commit_dashboard_state(st, bundle, source_name or uploaded.name)
+                st.session_state.pipeline_history.append({
+                    "source": uploaded.name,
+                    "sha256": bundle["sha256"],
+                    "records": bundle["records"],
+                    "completed_at": bundle["completed_at"],
+                })
+                archive.record_analysis_snapshot(run_id, current_digest, bundle["analysis"].get("analyst_alerts", []))
+                archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
+                st.session_state.analysis_state = "COMPLETE"
+                st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence and preserved in Evidence History."
+                st.rerun()
+            except Exception as exc:
+                st.session_state.analysis_state = "FAILED"
+                st.session_state.pipeline_stage = "FAILED"
+                st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
+                detail = f"{type(exc).__name__}: {exc}"
+                if run_id is not None:
+                    try:
+                        EvidenceStore().finish_analysis_run(run_id, "FAILED", error=detail)
+                    except Exception:
+                        pass
+                st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {detail}"
+                st.error(f"Analysis failed safely: {detail}")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="box" style="border-color:#00e5ff;"><b>PRIMARY WORKFLOW — EVIDENCE INTAKE</b> &nbsp; Upload → Preserve → Analyse → Investigate → Report. Start here for local security logs; accepted evidence is SHA-256 preserved before analysis.</div>', unsafe_allow_html=True)
 
 _df = dataframe()
 live_dashboard = st.empty()
@@ -511,97 +604,7 @@ with right:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-st.markdown('<div class="panel"><div class="pt">Log Analysis Center</div>', unsafe_allow_html=True)
-st.caption(f"Local evidence analysis • up to {MAX_UPLOAD_BYTES / (1024**3):.0f} GiB per file • sanitized, hashed and analyzed offline. No separate validation/staging step is required.")
 
-with st.expander("Analyze security logs", expanded=True):
-    uploaded = st.file_uploader(
-        "Choose a local log file",
-        type=sorted(ALLOWED_UPLOAD_TYPES),
-        accept_multiple_files=False,
-        max_upload_size=1024,
-        help="Local files up to 1 GiB. Uploaded content is never executed.",
-    )
-    fmt = st.selectbox("Format", ["AUTO", "TEXT / SYSLOG", "CSV", "JSON", "JSONL", "XML"])
-    source_name = st.text_input("Source", value="Local evidence")
-
-    if uploaded is None:
-        st.info("Select a local evidence file, then click Analyze. No separate validation step is required.")
-    else:
-        raw_bytes = uploaded.getvalue()
-        current_digest = __import__("hashlib").sha256(raw_bytes).hexdigest()
-        size_mb = len(raw_bytes) / (1024 * 1024)
-        st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • SHA-256 {current_digest[:16]}…")
-
-        if st.button("Analyze Evidence", type="primary", use_container_width=True):
-            run_id = None
-            try:
-                archive = EvidenceStore()
-                archive.archive_evidence(raw_bytes, uploaded.name, fmt)
-                run_id = archive.start_analysis_run(current_digest)
-                st.session_state.analysis_state = "ANALYZING"
-                st.session_state.pipeline_stage = "ANALYZE"
-                progress = st.progress(0, text="Starting evidence analysis…")
-                live_dashboard.empty()
-                preview = st.empty()
-                from collections import deque
-                preview_rows = deque(maxlen=MAX_UI_ROWS)
-
-                def publish_chunk(events, processed, total):
-                    for event in events:
-                        preview_rows.append({
-                            "event_id": f"EVT-{event.raw_sha256[:10].upper()}",
-                            "timestamp": event.timestamp.isoformat(),
-                            "severity": event.severity or "LOW",
-                            "source_ip": event.source_ip or "N/A",
-                            "target_endpoint": event.fields.get("path") or event.fields.get("endpoint") or event.destination_ip or event.event_type,
-                            "attack_type": event.action or event.event_type,
-                        })
-                    if total:
-                        pct = min(0.99, processed / total)
-                        progress.progress(pct, text=f"Analyzing evidence… {processed:,}/{total:,} records")
-                    else:
-                        progress.progress(0.0, text=f"Analyzing evidence… {processed:,} records processed • complete evidence scan in progress")
-                    live = pd.DataFrame(list(preview_rows))
-                    with live_dashboard.container():
-                        lm1, lm2, lm3, lm4 = st.columns(4)
-                        lm1.metric("Analyzed Records", processed)
-                        lm2.metric("Critical Anomalies", int((live["severity"] == "CRITICAL").sum()) if not live.empty else 0)
-                        lm3.metric("High / Warning", int(live["severity"].isin(["HIGH", "WARNING"]).sum()) if not live.empty else 0)
-                        lm4.metric("Latest Event", preview_rows[-1]["event_id"] if preview_rows else "-")
-                        st.caption("LIVE ANALYSIS FEED • records are being normalized while the evidence is analyzed")
-                        render_table(live.tail(MAX_UI_ROWS))
-
-                bundle = analyze_bytes_incremental(raw_bytes, uploaded.name, fmt, on_chunk=publish_chunk)
-                if bundle["sha256"] != current_digest:
-                    raise ValueError("Evidence changed during analysis. Please analyze the current file again.")
-                progress.progress(1.0, text=f"Analysis complete • {bundle['records']:,} records")
-                commit_dashboard_state(st, bundle, source_name or uploaded.name)
-                st.session_state.pipeline_history.append({
-                    "source": uploaded.name,
-                    "sha256": bundle["sha256"],
-                    "records": bundle["records"],
-                    "completed_at": bundle["completed_at"],
-                })
-                archive.record_analysis_snapshot(run_id, current_digest, bundle["analysis"].get("analyst_alerts", []))
-                archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
-                st.session_state.analysis_state = "COMPLETE"
-                st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence and preserved in Evidence History."
-                st.rerun()
-            except Exception as exc:
-                st.session_state.analysis_state = "FAILED"
-                st.session_state.pipeline_stage = "FAILED"
-                st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
-                detail = f"{type(exc).__name__}: {exc}"
-                if run_id is not None:
-                    try:
-                        EvidenceStore().finish_analysis_run(run_id, "FAILED", error=detail)
-                    except Exception:
-                        pass
-                st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {detail}"
-                st.error(f"Analysis failed safely: {detail}")
-
-st.markdown('</div>', unsafe_allow_html=True)
 
 
 
