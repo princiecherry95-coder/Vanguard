@@ -27,8 +27,20 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - name: Install runtime dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Install runtime and development dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Dependency consistency
+        run: python -m pip check
+      - name: Pytest regression suite
+        run: python -m pytest -q
+      - name: Ruff lint
+        run: python -m ruff check --output-format=github .
+      - name: Bandit security scan
+        run: python -m bandit -q -r engine.py ingestion.py audit.py evidence_store.py detection_registry.py risk.py triage.py soc_pipeline.py -lll
+      - name: Dependency vulnerability audit
+        run: python -m pip_audit -r requirements.txt
       - name: Source smoke test
         run: python smoke_test.py
       - name: Engine regression tests
@@ -42,6 +54,6 @@ jobs:
       - name: Defensive security regression tests
         run: python test_security.py
       - name: Compile all runtime modules
-        run: python -m py_compile app.py engine.py ingestion.py audit.py distributed.py firewall.py remediation.py threat_intel.py windows_events.py local_ai.py soc_pipeline.py runtime_smoke_test.py
+        run: python -m py_compile app.py engine.py ingestion.py audit.py distributed.py firewall.py remediation.py threat_intel.py windows_events.py local_ai.py soc_pipeline.py detection_registry.py evidence_store.py risk.py triage.py runtime_smoke_test.py
       - name: Cross-platform runtime smoke test
         run: python runtime_smoke_test.py
