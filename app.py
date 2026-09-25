@@ -20,6 +20,7 @@ from local_ai import explain as local_ai_explain
 from soc_pipeline import analyze_bytes, analyze_bytes_incremental, commit_dashboard_state, stage_status
 from analytics import summary as analytics_summary, trend as analytics_trend, findings_dataframe, attack_matrix, rule_counts_dataframe
 from reporting import export_bundle
+from export_service import record_export_download
 from intelligence_fusion import extract_iocs
 from soc_context import build_soc_context
 from evidence_store import EvidenceStore
@@ -122,6 +123,7 @@ def init_state() -> None:
         "analysis_state": "IDLE",
         "analysis_completed_at": None,
         "analysis_evidence_sha256": None,
+        "analysis_run_id": None,
         "validation_summary": None,
         "validation_key": None,
         "incident_exports": 0,
@@ -214,6 +216,7 @@ else:
                 archive = EvidenceStore()
                 archive.archive_evidence(raw_bytes, uploaded.name, fmt)
                 run_id = archive.start_analysis_run(current_digest)
+                st.session_state.analysis_run_id = run_id
                 st.session_state.analysis_state = "ANALYZING"
                 st.session_state.pipeline_stage = "ANALYZE"
                 progress = st.progress(0, text="Starting evidence analysis…")
@@ -287,13 +290,25 @@ if st.session_state.logs and st.session_state.analysis_result:
     st.markdown('<div class="pt">DOWNLOAD ANALYZED DATA</div>', unsafe_allow_html=True)
     st.caption("Lossless exports • all analyzed records and parsed fields • suitable for review, printing and archival.")
     export_cols = st.columns(3, gap="small")
+    export_run_id = st.session_state.analysis_run_id
+    def _record_download(format_name, filename, payload):
+        try:
+            record_export_download(EvidenceStore(), export_sha or None, export_run_id, format_name, filename, payload)
+            st.session_state.incident_exports = int(st.session_state.get("incident_exports", 0)) + 1
+            st.session_state.last_action = f"{format_name.upper()} export recorded and downloaded."
+        except Exception as exc:
+            st.session_state.last_action = f"{format_name.upper()} export audit failed: {type(exc).__name__}: {exc}"
+            st.error(f"{format_name.upper()} export was generated, but its audit record could not be written.")
     with export_cols[0]:
         pdf_bytes = __import__("reporting").make_pdf(st.session_state.logs, st.session_state.analysis_result, export_source)
-        st.download_button("Download PDF", data=pdf_bytes, file_name=f"vanguard_analysis_{export_sha[:12]}.pdf", mime="application/pdf", use_container_width=True)
+        pdf_name = f"vanguard_analysis_{export_sha[:12]}.pdf"
+        st.download_button("Download PDF", data=pdf_bytes, file_name=pdf_name, mime="application/pdf", use_container_width=True, on_click=_record_download, args=("pdf", pdf_name, pdf_bytes))
     with export_cols[1]:
         docx_bytes = __import__("reporting").make_docx(st.session_state.logs, st.session_state.analysis_result, export_source)
-        st.download_button("Download Word", data=docx_bytes, file_name=f"vanguard_analysis_{export_sha[:12]}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+        docx_name = f"vanguard_analysis_{export_sha[:12]}.docx"
+        st.download_button("Download Word", data=docx_bytes, file_name=docx_name, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True, on_click=_record_download, args=("docx", docx_name, docx_bytes))
     with export_cols[2]:
         xlsx_bytes = __import__("reporting").make_xlsx(st.session_state.logs, st.session_state.analysis_result, export_source)
-        st.download_button("Download Excel", data=xlsx_bytes, file_name=f"vanguard_analysis_{export_sha[:12]}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        xlsx_name = f"vanguard_analysis_{export_sha[:12]}.xlsx"
+        st.download_button("Download Excel", data=xlsx_bytes, file_name=xlsx_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, on_click=_record_download, args=("xlsx", xlsx_name, xlsx_bytes))
     st.markdown('</div>', unsafe_allow_html=True)
