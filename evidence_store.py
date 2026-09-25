@@ -204,7 +204,8 @@ class EvidenceStore:
                     ),
                 )
             conn.commit()
-        finally: conn.close()
+        finally:
+            conn.close()
 
     def analysis_variation(self, evidence_sha256: str, run_id: int) -> dict:
         conn = self._connect()
@@ -230,7 +231,8 @@ class EvidenceStore:
                         "finding_key": k, "rule_id": c[k]["rule_id"], "reason": c[k]["reason"], "differences": dif,
                     })
             return {"baseline_run_id":prev[0],"added":added,"removed":removed,"changed":changed,"added_count":len(added),"removed_count":len(removed),"changed_count":len(changed),"total_variations":len(added)+len(removed)+len(changed)}
-        finally: conn.close()
+        finally:
+            conn.close()
 
     def summary(self, evidence_sha256: str) -> dict:
         conn = self._connect()
