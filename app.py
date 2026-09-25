@@ -21,6 +21,7 @@ from analytics import summary as analytics_summary, trend as analytics_trend, fi
 from reporting import export_bundle
 from intelligence_fusion import extract_iocs
 from soc_context import build_soc_context
+from evidence_store import EvidenceStore
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -504,7 +505,11 @@ with st.expander("Analyze security logs", expanded=True):
         st.caption(f"Evidence: {uploaded.name} • {size_mb:,.1f} MB • SHA-256 {current_digest[:16]}…")
 
         if st.button("Analyze Evidence", type="primary", use_container_width=True):
+            run_id = None
             try:
+                archive = EvidenceStore()
+                archive.archive_evidence(raw_bytes, uploaded.name, fmt)
+                run_id = archive.start_analysis_run(current_digest)
                 st.session_state.analysis_state = "ANALYZING"
                 st.session_state.pipeline_stage = "ANALYZE"
                 progress = st.progress(0, text="Starting evidence analysis…")
@@ -549,20 +554,58 @@ with st.expander("Analyze security logs", expanded=True):
                     "records": bundle["records"],
                     "completed_at": bundle["completed_at"],
                 })
+                archive.finish_analysis_run(run_id, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
                 st.session_state.analysis_state = "COMPLETE"
-                st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence."
+                st.session_state.last_action = f"Analysis complete for {uploaded.name}. Dashboard updated from the analyzed evidence and preserved in Evidence History."
                 st.rerun()
             except Exception as exc:
                 st.session_state.analysis_state = "FAILED"
                 st.session_state.pipeline_stage = "FAILED"
                 st.session_state.analysis_completed_at = datetime.now(timezone.utc).isoformat()
                 detail = f"{type(exc).__name__}: {exc}"
+                if run_id is not None:
+                    try:
+                        EvidenceStore().finish_analysis_run(run_id, "FAILED", error=detail)
+                    except Exception:
+                        pass
                 st.session_state.last_action = f"Analysis failed safely for {uploaded.name}: {detail}"
                 st.error(f"Analysis failed safely: {detail}")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
 
+
+st.markdown('<div class="panel"><div class="pt">Evidence History & Replay</div>', unsafe_allow_html=True)
+st.caption("Every accepted upload is preserved by SHA-256 in the local evidence archive with upload time, filename, format and analysis-run history. Previous evidence can be reloaded and analyzed again without changing the original evidence record.")
+store = EvidenceStore()
+history_rows = store.history(limit=100)
+if history_rows:
+    history_view = [{k: r[k] for k in ["id","filename","format","size_bytes","uploaded_at","evidence_sha256","status"]} for r in history_rows]
+    render_table(history_view)
+    choices = [f"{r['id']} • {r['filename']} • {r['uploaded_at']} • {r['evidence_sha256'][:12]}…" for r in history_rows]
+    selected_idx = st.selectbox("Select preserved evidence", range(len(choices)), format_func=lambda i: choices[i], key="history_select")
+    selected = history_rows[selected_idx]
+    runs = store.analysis_history(selected["evidence_sha256"], limit=20)
+    if runs:
+        st.markdown("**Analysis runs for selected evidence**")
+        render_table([{k: r[k] for k in ["id","started_at","completed_at","status","records","finding_groups","risk_score","error"]} for r in runs])
+    if st.button("Analyze Selected Historical Evidence", type="primary", use_container_width=True):
+        try:
+            data, meta = store.load_evidence(selected["evidence_sha256"])
+            rid = store.start_analysis_run(selected["evidence_sha256"])
+            bundle = analyze_bytes(data, meta["filename"], meta["format"])
+            commit_dashboard_state(st, bundle, meta["filename"])
+            store.finish_analysis_run(rid, "COMPLETE", bundle["records"], len(bundle["analysis"].get("analyst_alerts", [])), bundle["analysis"].get("risk_score"))
+            st.session_state.last_action = f"Historical evidence replay completed for {meta['filename']}."
+            st.rerun()
+        except Exception as exc:
+            if 'rid' in locals():
+                try: store.finish_analysis_run(rid, "FAILED", error=f"{type(exc).__name__}: {exc}")
+                except Exception: pass
+            st.error(f"Historical analysis failed safely: {type(exc).__name__}: {exc}")
+else:
+    st.info("No preserved evidence uploads yet. Analyze a local file to create the first immutable evidence-history entry.")
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel"><div class="pt">Local SOC Analytics Engine</div>', unsafe_allow_html=True)
 st.caption("Offline ingestion • normalization • deterministic detection • correlation")
