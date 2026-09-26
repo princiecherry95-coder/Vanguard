@@ -100,3 +100,9 @@ Local virtual environments, raw evidence, audit databases and runtime caches are
 ## Version
 
 Current architecture baseline: **0.4.0**
+
+## Enterprise security capability layer
+
+Vanguard now exposes an explicit capability catalog and an offline SQLite enterprise-security registry covering cases, IOCs, vulnerabilities, UEBA observations, compliance evidence mappings and approval-required SOAR playbook runs. Implemented, integration-boundary and planned capabilities are deliberately separated so the UI and documentation do not claim unavailable integrations.
+
+See [docs/FULL_PLATFORM_SPEC.md](docs/FULL_PLATFORM_SPEC.md) for the complete platform specification.
