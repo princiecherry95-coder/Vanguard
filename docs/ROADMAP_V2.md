@@ -26,3 +26,15 @@ COMMAND → TRIAGE → INVESTIGATE → EVIDENCE → DETECTIONS → RESPONSE → 
 5. No runtime external network dependency.
 6. Audit-chain verification passes.
 7. Repository contains no committed local virtual environment in the current tree.
+
+
+## Enterprise capability expansion
+- Offline enterprise-security registry for cases, IOCs, vulnerabilities, UEBA, compliance mappings and approval-gated playbook requests.
+- Explicit capability catalog prevents the UI from presenting future integrations as installed functionality.
+- Full platform specification: `docs/FULL_PLATFORM_SPEC.md`.
+
+## Next integration boundaries
+- STIX 2.1 / TAXII 2.1 exchange
+- Sigma / YARA rule-pack import
+- Graph investigation workspace
+- Scale-out FastAPI/OpenSearch/Redis/event-streaming architecture when deployment volume requires it.
