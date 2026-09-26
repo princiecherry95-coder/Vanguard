@@ -24,7 +24,7 @@ REQUIRED = (
     "html.escape",
     "st.file_uploader",
     "Choose a local log file",
-    "Download analyzed data",
+    "DOWNLOAD ANALYZED DATA",
     "analyze_bytes_incremental",
 )
 
