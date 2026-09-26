@@ -25,6 +25,8 @@ from intelligence_fusion import extract_iocs
 from soc_context import build_soc_context
 from evidence_store import EvidenceStore
 from security_operations import SecurityOperationsStore, telemetry_status
+from enterprise_security import EnterpriseSecurityStore
+from platform_catalog import capabilities, capability_summary
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -588,6 +590,32 @@ buffer = EventBuffer()
 buffer.add({"source": "dashboard", "timestamp": datetime.now(timezone.utc).isoformat()})
 st.metric("Local buffer capacity", 50000)
 st.caption("Bounded in-memory buffering prevents unbounded ingestion growth.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">ENTERPRISE SECURITY CAPABILITY CENTER</div>', unsafe_allow_html=True)
+ec = EnterpriseSecurityStore()
+ec_summary = ec.summary()
+cap_summary = capability_summary()
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Cases", ec_summary["cases"])
+m2.metric("IOCs", ec_summary["iocs"])
+m3.metric("Vulnerabilities", ec_summary["vulnerabilities"])
+m4.metric("UEBA Observations", ec_summary["ueba_observations"])
+st.caption("Implemented capabilities are shown separately from integration/planned boundaries so the interface never overstates what is installed.")
+cap_cols = st.columns(3)
+with cap_cols[0]:
+    st.write("**AVAILABLE**", cap_summary["AVAILABLE"])
+    st.write("SIEM • Detection • Evidence • Threat Intel • Assets • Incidents • UEBA • Vulnerability • SOAR registry • Compliance • AI boundary")
+with cap_cols[1]:
+    st.write("**INTEGRATION**", cap_summary["INTEGRATION"])
+    st.write("STIX/TAXII • Sigma/YARA rule packs")
+with cap_cols[2]:
+    st.write("**PLANNED**", cap_summary["PLANNED"])
+    st.write("Graph investigation")
+with st.expander("Capability catalogue", expanded=False):
+    st.dataframe(pd.DataFrame([{
+        "Capability": x.name, "Status": x.status, "Technology": x.technology, "Description": x.description
+    } for x in capabilities()]), use_container_width=True, hide_index=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel"><div class="pt">EVIDENCE OPERATIONS STATUS</div>', unsafe_allow_html=True)
