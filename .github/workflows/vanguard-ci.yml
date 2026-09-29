@@ -60,3 +60,29 @@ jobs:
         run: python -m py_compile app.py engine.py ingestion.py audit.py distributed.py firewall.py remediation.py threat_intel.py windows_events.py local_ai.py soc_pipeline.py detection_registry.py evidence_store.py risk.py triage.py runtime_smoke_test.py
       - name: Cross-platform runtime smoke test
         run: python runtime_smoke_test.py
+
+
+  container:
+    name: Vercel container build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Build production container
+        run: docker build -f Dockerfile.vercel -t vanguard-vercel-smoke .
+      - name: Start production container
+        run: |
+          docker run -d --name vanguard-vercel-smoke -p 8080:80 vanguard-vercel-smoke
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/_stcore/health | grep -qi ok; then
+              echo "Vanguard Vercel container smoke test: PASS"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs vanguard-vercel-smoke
+          exit 1
+      - name: Stop production container
+        if: always()
+        run: docker rm -f vanguard-vercel-smoke 2>/dev/null || true
