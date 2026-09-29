@@ -23,7 +23,7 @@ def _clip(value: Any, limit: int = MAX_TEXT) -> str:
 
 @contextmanager
 def _db(path: Path):
-    """Open an isolated registry connection and always close it on exit."""
+    """Open an isolated registry connection with deterministic commit/rollback/close."""
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     try:
@@ -68,8 +68,12 @@ def _db(path: Path):
       status TEXT NOT NULL DEFAULT 'NOT_ASSESSED', evidence_refs_json TEXT NOT NULL DEFAULT '[]',
       owner TEXT NOT NULL DEFAULT '', reviewed_at TEXT
     );
-    """ )
+    """)
         yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
