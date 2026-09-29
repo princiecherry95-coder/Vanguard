@@ -69,6 +69,7 @@ def _db(path: Path):
       owner TEXT NOT NULL DEFAULT '', reviewed_at TEXT
     );
     """ )
+        yield conn
     finally:
         conn.close()
 
