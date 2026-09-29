@@ -27,6 +27,7 @@ from evidence_store import EvidenceStore
 from security_operations import SecurityOperationsStore, telemetry_status
 from enterprise_security import EnterpriseSecurityStore
 from platform_catalog import capabilities, capability_summary
+from supabase_store import SupabaseStore
 
 st.set_page_config(page_title="VANGUARD — SOC Intelligence Platform", page_icon="🛡️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -616,6 +617,30 @@ with st.expander("Capability catalogue", expanded=False):
     st.dataframe(pd.DataFrame([{
         "Capability": x.name, "Status": x.status, "Technology": x.technology, "Description": x.description
     } for x in capabilities()]), use_container_width=True, hide_index=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="panel"><div class="pt">CLOUD PERSISTENCE STATUS</div>', unsafe_allow_html=True)
+sb = SupabaseStore()
+sb_status = sb.safe_status
+cloud_cols = st.columns(3)
+cloud_cols[0].metric("Supabase", "CONFIGURED" if sb_status["configured"] else "OFFLINE")
+cloud_cols[1].metric("API URL", "READY" if sb_status["url_configured"] else "MISSING")
+cloud_cols[2].metric("Server credential", "READY" if sb_status["credential_configured"] else "MISSING")
+if sb.configured:
+    if st.button("Test Supabase connection", key="vanguard_supabase_health"):
+        if sb.health():
+            st.success("Supabase authenticated read: PASS")
+        else:
+            st.error("Supabase authenticated read: FAILED")
+    if st.button("Sync structured enterprise metadata", key="vanguard_supabase_sync"):
+        try:
+            sync_counts = sb.sync_enterprise_store(ec)
+            st.success(f"Cloud sync complete: {sum(sync_counts.values())} structured records mirrored.")
+            st.json(sync_counts)
+        except Exception as exc:
+            st.error(f"Cloud sync failed: {exc}")
+else:
+    st.info("Supabase is optional. Vanguard remains fully functional offline; configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY server-side to enable cloud persistence. Raw evidence is not uploaded by this integration.")
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="panel"><div class="pt">EVIDENCE OPERATIONS STATUS</div>', unsafe_allow_html=True)
