@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,11 +21,14 @@ def _now() -> str:
 def _clip(value: Any, limit: int = MAX_TEXT) -> str:
     return str(value or "")[:limit]
 
-def _db(path: Path) -> sqlite3.Connection:
+@contextmanager
+def _db(path: Path):
+    """Open an isolated registry connection and always close it on exit."""
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript("""
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript("""
     CREATE TABLE IF NOT EXISTS cases (
       case_key TEXT PRIMARY KEY, title TEXT NOT NULL, severity TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'OPEN', owner TEXT NOT NULL DEFAULT '',
@@ -65,7 +69,8 @@ def _db(path: Path) -> sqlite3.Connection:
       owner TEXT NOT NULL DEFAULT '', reviewed_at TEXT
     );
     """ )
-    return conn
+    finally:
+        conn.close()
 
 class EnterpriseSecurityStore:
     """Small, deterministic SQLite registry that can run in an air-gapped SOC."""
